@@ -70,3 +70,13 @@ mobile/**/*.iml
 *.apk
 *.aab
 *.ipa
+
+# ===========================
+# Test artifacts (automation)
+# ===========================
+# 测试截图和UI dump是临时产物，不纳入版本控制
+shot_*.png
+app_ui*.xml
+# 测试输出截图目录
+test_output/
+screenshots/
