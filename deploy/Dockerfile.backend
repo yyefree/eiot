@@ -1,0 +1,8 @@
+FROM alpine:3.19
+RUN apk --no-cache add ca-certificates tzdata
+ENV TZ=Asia/Shanghai
+WORKDIR /app
+COPY deploy/eiot-server ./eiot-server
+RUN chmod +x /app/eiot-server
+EXPOSE 8080
+CMD ["/app/eiot-server"]

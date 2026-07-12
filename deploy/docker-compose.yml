@@ -1,0 +1,107 @@
+name: eIOT
+
+services:
+  mysql:
+    container_name: eiot-mysql
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "eiot"
+      MYSQL_DATABASE: "eiot"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
+    volumes:
+      - eiot-mysql-data:/var/lib/mysql
+    networks:
+      - eiot-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-peiot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    container_name: eiot-redis
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - eiot-redis-data:/data
+    networks:
+      - eiot-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  emqx:
+    container_name: eiot-emqx
+    image: emqx:5.7
+    restart: unless-stopped
+    hostname: eiot-emqx
+    environment:
+      - EMQX_NAME=eiot-broker
+      - EMQX_NODE__NAME=eiot-broker@eiot-emqx
+      - EMQX_LISTENERS__TCP__DEFAULT__BIND=0.0.0.0:1883
+    ports:
+      - "18083:18083"
+    volumes:
+      - eiot-emqx-data:/opt/emqx/data
+      - eiot-emqx-log:/opt/emqx/log
+    networks:
+      - eiot-net
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  backend:
+    container_name: eiot-backend
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    restart: unless-stopped
+    environment:
+      EIOT_DB: "root:eiot@tcp(mysql:3306)/eiot?charset=utf8mb4&parseTime=True&loc=Local"
+      EIOT_REDIS: "redis:6379"
+      EIOT_EMQX: "tcp://emqx:1883"
+      EIOT_JWT_SECRET: "eiot-super-secret-key-change-me"
+      EIOT_ADMIN_PHONE: "13800000000"
+      EIOT_ADMIN_PASSWORD: "admin123"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_started
+    networks:
+      - eiot-net
+
+  frontend:
+    container_name: eiot-frontend
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    depends_on:
+      - backend
+    networks:
+      - eiot-net
+
+volumes:
+  eiot-mysql-data:
+  eiot-redis-data:
+  eiot-emqx-data:
+  eiot-emqx-log:
+
+networks:
+  eiot-net:
+    driver: bridge
+    name: eiot-net

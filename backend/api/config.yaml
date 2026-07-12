@@ -1,0 +1,22 @@
+Name: eiot-api
+Host: 0.0.0.0
+Port: 8080
+JWTSecret: eiot-super-secret-key-change-me
+AdminPhone: "13800000000"
+AdminPassword: "admin123"
+# CORS 白名单，逗号分隔，* 表示允许所有（开发环境）
+# 生产环境请填写具体域名，如：https://admin.example.com,https://m.example.com
+CORSOrigins: "*"
+MySQL:
+  DSN: "root:eiot@tcp(mysql:3306)/eiot?charset=utf8mb4&parseTime=True&loc=Local"
+Redis:
+  Addr: "redis:6379"
+  Password: ""
+  DB: 0
+TDengine:
+  DSN: ""
+EMQX:
+  Broker: "tcp://emqx:1883"
+  Username: "eiot"
+  Password: "eiot2026"
+  ClientID: "eiot-backend"

@@ -1,0 +1,72 @@
+# ===========================
+# Operating System
+# ===========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===========================
+# IDE / Editor
+# ===========================
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*.swo
+
+# ===========================
+# Backend (Go)
+# ===========================
+backend/eiot-server.exe
+backend/eiot-server
+backend/*.exe
+
+# ===========================
+# Frontend (Vue/Vite)
+# ===========================
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+
+# ===========================
+# Mobile (Flutter)
+# ===========================
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/build/
+mobile/.pub-cache/
+mobile/.pub/
+mobile/coverage/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/debug/
+mobile/android/app/profile/
+mobile/android/app/release/
+mobile/android/captures/
+mobile/android/key.properties
+mobile/**/*.iml
+
+# ===========================
+# Logs / Temp
+# ===========================
+*.log
+*.tmp
+*.bak
+
+# ===========================
+# Env / Secrets
+# ===========================
+.env
+.env.local
+*.env
+
+# ===========================
+# Build artifacts
+# ===========================
+*.apk
+*.aab
+*.ipa
