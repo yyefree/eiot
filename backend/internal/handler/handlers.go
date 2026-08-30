@@ -142,6 +142,8 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 		api.POST("/auth/login", wrap(sc, handleLogin))
 		api.POST("/auth/send-code", wrap(sc, handleSendCode))
 		api.POST("/auth/login-code", wrap(sc, handleLoginCode))
+		api.POST("/auth/register", wrap(sc, handleRegister))
+		api.POST("/auth/refresh", wrap(sc, handleRefreshToken))
 		api.GET("/user/info", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUserInfo))
 		api.PUT("/user/info", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUpdateUserInfo))
 		api.PUT("/user/password", middleware.AuthMiddleware(sc.Config), wrap(sc, handleChangePassword))
@@ -185,6 +187,9 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
           admin.GET("/device", wrap(sc, handleListDevice))
           admin.PUT("/device/:id", wrap(sc, handleUpdateAdminDevice))
           admin.DELETE("/device/:id", wrap(sc, handleDeleteAdminDevice))
+			admin.PUT("/device/:id/online", wrap(sc, handleDeviceOnline))
+			admin.PUT("/device/:id/offline", wrap(sc, handleDeviceOffline))
+			admin.GET("/category", wrap(sc, handleListCategories))
 
 			// 告警规则
 			admin.POST("/alert-rule", wrap(sc, handleCreateAlertRule))
@@ -263,6 +268,7 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 		{
 			scene.POST("", wrap(sc, handleCreateScene))
 			scene.GET("", wrap(sc, handleListScenes))
+			scene.GET("/:id", wrap(sc, handleGetSceneDetail))
 			scene.PUT("/:id", wrap(sc, handleUpdateScene))
 			scene.DELETE("/:id", wrap(sc, handleDeleteScene))
 			scene.PUT("/:id/toggle", wrap(sc, handleToggleScene))
@@ -418,6 +424,57 @@ func handleLoginCode(c *gin.Context, sc *svc.ServiceContext) (interface{}, error
 		return nil, err
 	}
 	return gin.H{"token": token, "user": u}, nil
+}
+
+func handleRegister(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	phone := sVal(b["phone"])
+	password := sVal(b["password"])
+	nickname := sVal(b["nickname"])
+	code := sVal(b["code"])
+	if phone == "" || password == "" {
+		return nil, errors.New("手机号和密码不能为空")
+	}
+	if len(password) < 6 {
+		return nil, errors.New("密码长度不能少于6位")
+	}
+	// 使用验证码注册（开发模式 000000）
+	if code != "" && code != "000000" {
+		token, u, err := logic.LoginOrRegisterByCode(phone, code, sc.Config.JWTSecret)
+		if err != nil {
+			return nil, err
+		}
+		return gin.H{"token": token, "user": u}, nil
+	}
+	// 无验证码直接注册（开发模式）
+	token, err := logic.RegisterByPassword(phone, password, nickname, sc.Config.JWTSecret)
+	if err != nil {
+		// 返回 400 而非 500
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error(), "data": nil})
+		return nil, nil
+	}
+	return gin.H{"token": token}, nil
+}
+
+func handleRefreshToken(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	refreshToken := sVal(b["refresh_token"])
+	if refreshToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "refresh_token 不能为空", "data": nil})
+		return nil, nil
+	}
+	token, err := logic.RefreshToken(refreshToken, sc.Config.JWTSecret)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error(), "data": nil})
+		return nil, nil
+	}
+	return gin.H{"token": token}, nil
 }
 
 func handleUserInfo(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
@@ -1131,6 +1188,24 @@ func handleListScenes(c *gin.Context, sc *svc.ServiceContext) (interface{}, erro
 	return logic.ListScenes(uint(homeID))
 }
 
+func handleGetSceneDetail(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var s model.Scene
+	if err := dao.DB.First(&s, id).Error; err != nil {
+		return nil, errors.New("场景不存在")
+	}
+	var conditions []model.SceneCondition
+	dao.DB.Where("scene_id = ?", id).Find(&conditions)
+	var actions []model.SceneAction
+	dao.DB.Where("scene_id = ?", id).Order("sort_order asc").Find(&actions)
+	return gin.H{
+		"id": s.ID, "home_id": s.HomeID, "name": s.Name, "icon": s.Icon,
+		"type": s.Type, "enabled": s.Enabled, "sort_order": s.SortOrder,
+		"created_at": s.CreatedAt, "updated_at": s.UpdatedAt,
+		"conditions": conditions, "actions": actions,
+	}, nil
+}
+
 func handleUpdateScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
 	b, err := bodyMap(c)
 	if err != nil {
@@ -1157,7 +1232,11 @@ func handleToggleScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, err
 
 func handleRunScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	return nil, logic.RunScene(uint(id), sc.EMQX)
+	err := logic.RunScene(uint(id), sc.EMQX)
+	if err != nil {
+		return gin.H{"executed": false, "msg": err.Error()}, nil
+	}
+	return gin.H{"executed": true, "msg": "场景执行成功"}, nil
 }
 
 func handleAddSceneCondition(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
@@ -1399,7 +1478,7 @@ func handleCreateAlertRule(c *gin.Context, sc *svc.ServiceContext) (interface{},
 	if err != nil {
 		return nil, err
 	}
-	productID := uint(b["product_id"].(float64))
+	productID := uVal(b["product_id"], 0)
 	return logic.CreateAlertRule(productID, sVal(b["device_sn"]), sVal(b["property"]),
 		sVal(b["operator"]), sVal(b["threshold"]), sVal(b["notify_type"]),
 		sVal(b["notify_url"]), middleware.UID(c))
@@ -1428,4 +1507,38 @@ func handleToggleAlertRule(c *gin.Context, sc *svc.ServiceContext) (interface{},
 		enabled = v
 	}
 	return nil, logic.ToggleAlertRule(uint(id), enabled)
+}
+
+// ========== 设备上线/下线 ==========
+
+func handleDeviceOnline(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	now := time.Now()
+	err := dao.DB.Model(&model.Device{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"last_online": &now,
+		"updated_at":  now,
+	}).Error
+	return nil, err
+}
+
+func handleDeviceOffline(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	err := dao.DB.Model(&model.Device{}).Where("id = ?", id).Update("updated_at", time.Now()).Error
+	return nil, err
+}
+
+// ========== 设备分类 ==========
+
+func handleListCategories(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	categories := []map[string]interface{}{
+		{"id": 1, "name": "传感器", "icon": "sensor", "product_count": 0},
+		{"id": 2, "name": "灯具", "icon": "light", "product_count": 0},
+		{"id": 3, "name": "插座", "icon": "socket", "product_count": 0},
+		{"id": 4, "name": "开关", "icon": "switch", "product_count": 0},
+		{"id": 5, "name": "网关", "icon": "gateway", "product_count": 0},
+		{"id": 6, "name": "摄像头", "icon": "camera", "product_count": 0},
+		{"id": 7, "name": "空调", "icon": "ac", "product_count": 0},
+		{"id": 8, "name": "其他", "icon": "other", "product_count": 0},
+	}
+	return categories, nil
 }

@@ -135,6 +135,62 @@ func LoginOrRegisterByCode(phone, code, secret string) (string, *model.User, err
 	return token, &u, nil
 }
 
+// RegisterByPassword 密码注册（开发模式，无需验证码）
+func RegisterByPassword(phone, password, nickname, secret string) (string, error) {
+	if phone == "" || password == "" {
+		return "", errors.New("手机号和密码不能为空")
+	}
+	if len(password) < 6 {
+		return "", errors.New("密码长度不能少于6位")
+	}
+	// 检查手机号是否已注册
+	var count int64
+	dao.DB.Model(&model.User{}).Where("phone = ?", phone).Count(&count)
+	if count > 0 {
+		return "", errors.New("该手机号已注册")
+	}
+	if nickname == "" {
+		nickname = "用户"
+		if len(phone) >= 4 {
+			nickname = "用户" + phone[len(phone)-4:]
+		}
+	}
+	hashed, err := util.HashPassword(password)
+	if err != nil {
+		return "", err
+	}
+	u := model.User{
+		Username: "u_" + phone, Phone: phone, Password: hashed,
+		Nickname: nickname,
+		Role: "user", Status: 1,
+	}
+	if err := dao.DB.Create(&u).Error; err != nil {
+		return "", err
+	}
+	token, err := util.GenerateJWT(u.ID, u.Role, secret)
+	return token, err
+}
+
+// RefreshToken 刷新 Token（简单实现：从旧 token 解析 uid 重新签发）
+func RefreshToken(refreshToken, secret string) (string, error) {
+	claims, err := util.ParseJWT(refreshToken, secret)
+	if err != nil {
+		return "", errors.New("refresh_token 无效或已过期")
+	}
+	uidFloat, ok := claims["uid"].(float64)
+	if !ok {
+		return "", errors.New("无效的 token payload")
+	}
+	var u model.User
+	if err := dao.DB.First(&u, uint(uidFloat)).Error; err != nil {
+		return "", errors.New("用户不存在")
+	}
+	if u.Status != 1 {
+		return "", errors.New("账号已禁用")
+	}
+	return util.GenerateJWT(u.ID, u.Role, secret)
+}
+
 // GetUserInfo 获取用户信息
 func GetUserInfo(uid uint) (*model.User, error) {
 	var u model.User
