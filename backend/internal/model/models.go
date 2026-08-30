@@ -61,21 +61,25 @@ type Product struct {
 
 // Device 设备
 type Device struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	DeviceName string    `gorm:"size:128" json:"device_name"`
-	DeviceSN   string    `gorm:"size:64;uniqueIndex" json:"device_sn"`
-	DeviceSecret string  `gorm:"size:128" json:"-"`
-	ProductSecret string `gorm:"size:128" json:"-"`
-	ProductID  uint      `gorm:"index" json:"product_id"`
-	ProductKey string    `gorm:"size:64" json:"product_key"`
-	OwnerID    uint      `gorm:"index" json:"owner_id"`
-	Status     int       `gorm:"default:1" json:"status"`
-	BindMode   string    `gorm:"size:16;default:device_secret" json:"bind_mode"`
-	FirmwareVer string   `gorm:"size:32" json:"firmware_ver"`
-	IPAddress  string    `gorm:"size:45" json:"ip_address"`
-	LastOnline *time.Time `json:"last_online"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	DeviceName    string    `gorm:"size:128" json:"device_name"`
+	DeviceSN      string    `gorm:"size:64;uniqueIndex" json:"device_sn"`
+	DeviceSecret  string    `gorm:"size:128" json:"-"`
+	ProductSecret string    `gorm:"size:128" json:"-"`
+	ProductID     uint      `gorm:"index" json:"product_id"`
+	ProductKey    string    `gorm:"size:64" json:"product_key"`
+	OwnerID       uint      `gorm:"index" json:"owner_id"`
+	Status        int       `gorm:"default:1" json:"status"`
+	BindMode      string    `gorm:"size:16;default:device_secret" json:"bind_mode"`
+	FirmwareVer   string    `gorm:"size:32" json:"firmware_ver"`
+	IPAddress     string    `gorm:"size:45" json:"ip_address"`
+	LastOnline    *time.Time `json:"last_online"`
+	// 网关/子设备相关
+	NodeType      string    `gorm:"size:16;default:device" json:"node_type"`  // gateway / device / sub_device
+	GatewayID     uint      `gorm:"index" json:"gateway_id"`                  // 网关设备 ID
+	TopoStatus    string    `gorm:"size:16" json:"topo_status"`               // online / offline / adding / removing
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // DeviceShare 设备共享
@@ -225,6 +229,39 @@ type DeviceDataHistory struct {
 	CreatedAt time.Time `gorm:"index:idx_sn_ts" json:"created_at"`
 }
 
+// DeviceEventHistory 设备事件上报历史
+type DeviceEventHistory struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	DeviceSN   string    `gorm:"size:64;index:idx_ev_sn_ts" json:"device_sn"`
+	EventID    string    `gorm:"size:64;index:idx_ev_sn_ts" json:"event_id"`
+	EventName  string    `gorm:"size:128" json:"event_name"`
+	OutputJSON string    `gorm:"type:text" json:"output_json"`
+	CreatedAt  time.Time `gorm:"index:idx_ev_sn_ts" json:"created_at"`
+}
+
+// DeviceServiceHistory 设备服务调用历史
+type DeviceServiceHistory struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	DeviceSN    string    `gorm:"size:64;index:idx_svc_sn_ts" json:"device_sn"`
+	ServiceID   string    `gorm:"size:64;index:idx_svc_sn_ts" json:"service_id"`
+	ServiceName string    `gorm:"size:128" json:"service_name"`
+	InputJSON   string    `gorm:"type:text" json:"input_json"`
+	OutputJSON  string    `gorm:"type:text" json:"output_json"`
+	Status      string    `gorm:"size:16;default:success" json:"status"`
+	CreatedAt   time.Time `gorm:"index:idx_svc_sn_ts" json:"created_at"`
+}
+
+// DeviceShadow 设备影子（期望值/上报值）
+type DeviceShadow struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	DeviceSN      string    `gorm:"size:64;uniqueIndex" json:"device_sn"`
+	DesiredJSON   string    `gorm:"type:text" json:"desired_json"`
+	ReportedJSON  string    `gorm:"type:text" json:"reported_json"`
+	Version       int       `gorm:"default:0" json:"version"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // AlertRule 告警规则
 type AlertRule struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
@@ -239,4 +276,195 @@ type AlertRule struct {
 	CreatedBy   uint      `json:"created_by"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// MqttMessage MQTT 报文记录（调试用）
+type MqttMessage struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	DeviceSN  string    `gorm:"size:64;index:idx_mqtt_sn_ts" json:"device_sn"`
+	Topic     string    `gorm:"size:256" json:"topic"`
+	Direction string    `gorm:"size:8" json:"direction"` // up / down
+	Payload   string    `gorm:"type:text" json:"payload"`
+	CreatedAt time.Time `gorm:"index:idx_mqtt_sn_ts" json:"created_at"`
+}
+
+// ========== 规则引擎/场景联动 ==========
+
+// Rule 规则引擎规则
+type Rule struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"size:128" json:"name"`
+	Description string    `gorm:"size:512" json:"description"`
+	Type        string    `gorm:"size:32;default:auto" json:"type"` // auto / scene_linkage
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	TriggerJSON string    `gorm:"type:text" json:"trigger_json"` // 触发条件 JSON
+	ActionJSON  string    `gorm:"type:text" json:"action_json"`  // 执行动作 JSON
+	CreatedBy   uint      `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	LastRunAt   *time.Time `json:"last_run_at"`
+	RunCount    int       `gorm:"default:0" json:"run_count"`
+}
+
+// RuleExecution 规则执行记录
+type RuleExecution struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	RuleID    uint      `gorm:"index" json:"rule_id"`
+	TriggeredAt time.Time `json:"triggered_at"`
+	Success   bool      `gorm:"default:true" json:"success"`
+	ErrorMsg  string    `gorm:"size:512" json:"error_msg"`
+	DetailJSON string   `gorm:"type:text" json:"detail_json"`
+}
+
+// DeviceGroup 设备分组
+type DeviceGroup struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"size:128" json:"name"`
+	Description string    `gorm:"size:512" json:"description"`
+	ProductID   uint      `gorm:"index" json:"product_id"` // 0 表示跨产品分组
+	OwnerID     uint      `gorm:"index" json:"owner_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// DeviceGroupMember 设备分组成员
+type DeviceGroupMember struct {
+	GroupID   uint `gorm:"primaryKey" json:"group_id"`
+	DeviceID  uint `gorm:"primaryKey" json:"device_id"`
+}
+
+// DeviceTag 设备标签
+type DeviceTag struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	DeviceID  uint   `gorm:"index:idx_device_tag" json:"device_id"`
+	Key       string `gorm:"size:64;index:idx_device_tag" json:"key"`
+	Value     string `gorm:"size:255" json:"value"`
+}
+
+// DeviceTopology 网关子设备拓扑关系
+type DeviceTopology struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	GatewayID  uint      `gorm:"index" json:"gateway_id"`   // 网关设备 ID
+	SubDeviceID uint     `gorm:"index" json:"sub_device_id"` // 子设备 ID
+	Status     string    `gorm:"size:16;default:online" json:"status"` // online / offline
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// DeviceProvisioning 设备配网记录
+type DeviceProvisioning struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	ProductID   uint      `gorm:"index" json:"product_id"`
+	DeviceSN    string    `gorm:"size:64;index" json:"device_sn"`
+	DeviceName  string    `gorm:"size:128" json:"device_name"`
+	Method      string    `gorm:"size:32" json:"method"`        // ble / softap / qrcode / zero
+	Status      string    `gorm:"size:16;default:pending" json:"status"` // pending / success / failed / timeout
+	SSID        string    `gorm:"size:64" json:"ssid"`          // WiFi SSID (SoftAP)
+	BSSID       string    `gorm:"size:32" json:"bssid"`         // WiFi BSSID
+	PinCode     string    `gorm:"size:16" json:"pin_code"`      // 配网 PIN 码
+	QRCode      string    `gorm:"size:512" json:"qr_code"`      // 二维码内容
+	ErrorMsg    string    `gorm:"size:512" json:"error_msg"`
+	CreatedBy   uint      `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+}
+
+// ProvisioningConfig 配网配置模板
+type ProvisioningConfig struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	ProductID     uint      `gorm:"index" json:"product_id"`
+	Method        string    `gorm:"size:32" json:"method"`        // ble / softap / qrcode
+	BLEConfig     string    `gorm:"type:text" json:"ble_config"`  // 蓝牙配网参数 JSON
+	SoftAPConfig  string    `gorm:"type:text" json:"softap_config"` // SoftAP 配网参数 JSON
+	QRCodeConfig  string    `gorm:"type:text" json:"qrcode_config"` // 扫码配网参数 JSON
+	CreatedBy     uint      `json:"created_by"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// DataFlow 数据流转规则
+type DataFlow struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"size:128" json:"name"`
+	Description string    `gorm:"size:512" json:"description"`
+	Type        string    `gorm:"size:32" json:"type"`        // republish / forward / sql
+	SourceType  string    `gorm:"size:32" json:"source_type"` // topic / sql
+	SourceTopic string    `gorm:"size:256" json:"source_topic"`
+	SQL         string    `gorm:"type:text" json:"sql"`       // SQL 语句
+	TargetType  string    `gorm:"size:32" json:"target_type"` // republish / mysql / timeseries / http
+	TargetTopic string    `gorm:"size:256" json:"target_topic"`
+	TargetConfig string   `gorm:"type:text" json:"target_config"` // 目标配置 JSON
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	CreatedBy   uint      `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// DataFlowExecution 数据流转执行记录
+type DataFlowExecution struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	FlowID    uint      `gorm:"index" json:"flow_id"`
+	Status    string    `gorm:"size:16" json:"status"` // success / failed
+	ErrorMsg  string    `gorm:"size:512" json:"error_msg"`
+	InputJSON string    `gorm:"type:text" json:"input_json"`
+	OutputJSON string   `gorm:"type:text" json:"output_json"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ========== 多协议网关 ==========
+
+// ProtocolGateway 协议网关配置
+type ProtocolGateway struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	Name       string    `gorm:"size:128" json:"name"`
+	Type       string    `gorm:"size:32" json:"type"`        // coap / http / mqtt / modbus
+	Host       string    `gorm:"size:128" json:"host"`       // 监听地址
+	Port       int       `json:"port"`                       // 监听端口
+	Config     string    `gorm:"type:text" json:"config"`    // 协议特定配置 JSON
+	Enabled    bool      `gorm:"default:true" json:"enabled"`
+	CreatedBy  uint      `json:"created_by"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ProtocolMapping 协议映射（将协议数据映射为物模型）
+type ProtocolMapping struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	GatewayID   uint      `gorm:"index" json:"gateway_id"`
+	ProductID   uint      `gorm:"index" json:"product_id"`
+	ProtocolKey string    `gorm:"size:128" json:"protocol_key"` // 协议侧标识（如 Modbus 寄存器地址）
+	PropertyID  string    `gorm:"size:64" json:"property_id"`   // 物模型属性标识符
+	DataType    string    `gorm:"size:32" json:"data_type"`     // 数据类型转换
+	Scale       float64   `json:"scale"`                        // 缩放因子
+	Offset      float64   `json:"offset"`                       // 偏移量
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ========== 设备诊断/监控 ==========
+
+// DeviceDiagnostic 设备诊断记录
+type DeviceDiagnostic struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	DeviceSN   string    `gorm:"size:64;index:idx_diag_sn_ts" json:"device_sn"`
+	Type       string    `gorm:"size:32" json:"type"`        // connectivity / performance / firmware / security
+	Level      string    `gorm:"size:16" json:"level"`       // info / warning / critical
+	Title      string    `gorm:"size:128" json:"title"`
+	Detail     string    `gorm:"type:text" json:"detail"`
+	Status     string    `gorm:"size:16;default:open" json:"status"` // open / resolved / ignored
+	CreatedAt  time.Time `gorm:"index:idx_diag_sn_ts" json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at"`
+}
+
+// DeviceMetrics 设备指标统计
+type DeviceMetrics struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	DeviceSN     string    `gorm:"size:64;index:idx_metrics_sn_ts" json:"device_sn"`
+	OnlineTime   int64     `json:"online_time"`    // 在线时长(秒)
+	OfflineTime  int64     `json:"offline_time"`   // 离线时长(秒)
+	MessageCount int64     `json:"message_count"`  // 消息数
+	ErrorCount   int64     `json:"error_count"`    // 错误数
+	AvgLatency   float64   `json:"avg_latency"`    // 平均延迟(ms)
+	Date         time.Time `gorm:"index:idx_metrics_sn_ts" json:"date"` // 统计日期
 }

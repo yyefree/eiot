@@ -71,12 +71,44 @@ class DeviceDetail {
   final DeviceItem device;
   final Map<String, String> latest;
   final List<ThingProperty> properties;
+  final List<ThingEvent> events;
+  final List<ThingService> services;
 
   DeviceDetail({
     required this.device,
     this.latest = const {},
     this.properties = const [],
+    this.events = const [],
+    this.services = const [],
   });
+
+  factory DeviceDetail.fromJson(Map<String, dynamic> json) {
+    final props = <ThingProperty>[];
+    if (json['thingModel'] != null && json['thingModel']['properties'] is List) {
+      for (var p in json['thingModel']['properties']) {
+        props.add(ThingProperty.fromJson(p));
+      }
+    }
+    final events = <ThingEvent>[];
+    if (json['thingModel'] != null && json['thingModel']['events'] is List) {
+      for (var e in json['thingModel']['events']) {
+        events.add(ThingEvent.fromJson(e));
+      }
+    }
+    final services = <ThingService>[];
+    if (json['thingModel'] != null && json['thingModel']['services'] is List) {
+      for (var s in json['thingModel']['services']) {
+        services.add(ThingService.fromJson(s));
+      }
+    }
+    return DeviceDetail(
+      device: DeviceItem.fromJson(json['device'] ?? {}),
+      latest: (json['latest'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v?.toString() ?? '')) ?? {},
+      properties: props,
+      events: events,
+      services: services,
+    );
+  }
 }
 
 class ThingProperty {
@@ -87,6 +119,10 @@ class ThingProperty {
   final double? min;
   final double? max;
   final String unit;
+  final String description;
+  final bool required;
+  final double? step;
+  final List<String>? enumValues;
 
   ThingProperty({
     required this.identifier,
@@ -96,6 +132,10 @@ class ThingProperty {
     this.min,
     this.max,
     this.unit = '',
+    this.description = '',
+    this.required = false,
+    this.step,
+    this.enumValues,
   });
 
   static double? _toDouble(dynamic v) {
@@ -114,6 +154,12 @@ class ThingProperty {
     } else if (dt is String) {
       typeStr = dt;
     }
+    List<String>? enums;
+    if (specs?['enumValues'] is List) {
+      enums = (specs!['enumValues'] as List).map((e) => e.toString()).toList();
+    } else if (json['enumValues'] is List) {
+      enums = (json['enumValues'] as List).map((e) => e.toString()).toList();
+    }
     return ThingProperty(
       identifier: json['identifier'] as String? ?? '',
       name: json['name'] as String? ?? '',
@@ -122,12 +168,136 @@ class ThingProperty {
       min: _toDouble(specs?['min']),
       max: _toDouble(specs?['max']),
       unit: specs?['unit'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      required: json['required'] as bool? ?? false,
+      step: _toDouble(specs?['step']),
+      enumValues: enums,
     );
   }
 
   bool get canWrite => accessMode.contains('w');
   bool get isBool => dataType == 'bool';
   bool get isNumber => dataType == 'int' || dataType == 'float' || dataType == 'double';
+  bool get isEnum => enumValues != null && enumValues!.isNotEmpty;
+}
+
+class ThingEvent {
+  final String identifier;
+  final String name;
+  final String type;
+  final String description;
+  final List<EventOutputParam> outputParams;
+
+  ThingEvent({
+    required this.identifier,
+    required this.name,
+    this.type = 'info',
+    this.description = '',
+    this.outputParams = const [],
+  });
+
+  factory ThingEvent.fromJson(Map<String, dynamic> json) {
+    final output = <EventOutputParam>[];
+    if (json['outputParams'] is List) {
+      for (var p in json['outputParams']) {
+        output.add(EventOutputParam.fromJson(p));
+      }
+    }
+    return ThingEvent(
+      identifier: json['identifier']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      type: json['type']?.toString() ?? 'info',
+      description: json['description']?.toString() ?? '',
+      outputParams: output,
+    );
+  }
+}
+
+class EventOutputParam {
+  final String identifier;
+  final String name;
+  final String dataType;
+  final String unit;
+
+  EventOutputParam({
+    required this.identifier,
+    required this.name,
+    this.dataType = 'string',
+    this.unit = '',
+  });
+
+  factory EventOutputParam.fromJson(Map<String, dynamic> json) {
+    return EventOutputParam(
+      identifier: json['identifier']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      dataType: json['dataType']?.toString() ?? 'string',
+      unit: json['unit']?.toString() ?? '',
+    );
+  }
+}
+
+class ThingService {
+  final String identifier;
+  final String name;
+  final String description;
+  final String callType;
+  final List<ServiceParam> inputParams;
+  final List<ServiceParam> outputParams;
+
+  ThingService({
+    required this.identifier,
+    required this.name,
+    this.description = '',
+    this.callType = 'sync',
+    this.inputParams = const [],
+    this.outputParams = const [],
+  });
+
+  factory ThingService.fromJson(Map<String, dynamic> json) {
+    final inputs = <ServiceParam>[];
+    if (json['inputParams'] is List) {
+      for (var p in json['inputParams']) {
+        inputs.add(ServiceParam.fromJson(p));
+      }
+    }
+    final outputs = <ServiceParam>[];
+    if (json['outputParams'] is List) {
+      for (var p in json['outputParams']) {
+        outputs.add(ServiceParam.fromJson(p));
+      }
+    }
+    return ThingService(
+      identifier: json['identifier']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      callType: json['callType']?.toString() ?? 'sync',
+      inputParams: inputs,
+      outputParams: outputs,
+    );
+  }
+}
+
+class ServiceParam {
+  final String identifier;
+  final String name;
+  final String dataType;
+  final String unit;
+
+  ServiceParam({
+    required this.identifier,
+    required this.name,
+    this.dataType = 'string',
+    this.unit = '',
+  });
+
+  factory ServiceParam.fromJson(Map<String, dynamic> json) {
+    return ServiceParam(
+      identifier: json['identifier']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      dataType: json['dataType']?.toString() ?? 'string',
+      unit: json['unit']?.toString() ?? '',
+    );
+  }
 }
 
 class Home {

@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"bytes"
 	"eiot/internal/dao"
 	"eiot/internal/model"
 	"eiot/pkg/cache"
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +20,19 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// BizError 业务错误
+type BizError struct {
+	HTTPCode int
+	Code     int
+	Message  string
+}
+
+func (e *BizError) Error() string { return e.Message }
+
+func NewBizError(httpCode, code int, msg string) *BizError {
+	return &BizError{HTTPCode: httpCode, Code: code, Message: msg}
+}
 
 // codeStore 保存验证码（内存存储，简化解法）
 type codeItem struct {
@@ -55,18 +70,18 @@ func init() {
 // LoginByPassword 账号密码登录
 func LoginByPassword(phone, password, secret string) (string, *model.User, error) {
 	if phone == "" || password == "" {
-		return "", nil, errors.New("账号或密码不能为空")
+		return "", nil, NewBizError(http.StatusBadRequest, 400, "账号或密码不能为空")
 	}
 	var u model.User
 	if err := dao.DB.Where("phone = ? OR username = ?", phone, phone).First(&u).Error; err != nil {
-		return "", nil, errors.New("账号或密码错误")
+		return "", nil, NewBizError(http.StatusUnauthorized, 401, "账号或密码错误")
 	}
 	if u.Status != 1 {
-		return "", nil, errors.New("账号已禁用")
+		return "", nil, NewBizError(http.StatusForbidden, 403, "账号已禁用")
 	}
 	// 仅使用 bcrypt 校验，禁止明文密码 fallback
 	if !util.CheckPassword(password, u.Password) {
-		return "", nil, errors.New("账号或密码错误")
+		return "", nil, NewBizError(http.StatusUnauthorized, 401, "账号或密码错误")
 	}
 	token, err := util.GenerateJWT(u.ID, u.Role, secret)
 	return token, &u, err
@@ -673,11 +688,15 @@ func ControlDevice(uid uint, role string, id uint, params map[string]interface{}
 	// 通过 EMQX 下发
 	if emqx != nil {
 		if cli, ok := emqx.(interface{ Publish(string, interface{}) error }); ok {
-			_ = cli.Publish(fmt.Sprintf("/sys/cmd/%s", d.DeviceSN), map[string]interface{}{
+			topic := fmt.Sprintf("/sys/cmd/%s", d.DeviceSN)
+			payload := map[string]interface{}{
 				"product_key": d.ProductKey,
 				"params":      params,
 				"ts":          time.Now().Unix(),
-			})
+			}
+			_ = cli.Publish(topic, payload)
+			data, _ := json.Marshal(payload)
+			LogMqttMessage(d.DeviceSN, topic, "down", string(data))
 		}
 	}
 	// 记录日志
@@ -1427,6 +1446,245 @@ func GetDeviceDataHistory(deviceSN, property string, startTime, endTime time.Tim
 	return list, err
 }
 
+// ========== 事件 ==========
+
+// ReportDeviceEvent 设备上报事件
+func ReportDeviceEvent(deviceSN, eventID, eventName, outputJSON string) error {
+	history := model.DeviceEventHistory{
+		DeviceSN:   deviceSN,
+		EventID:    eventID,
+		EventName:  eventName,
+		OutputJSON: outputJSON,
+		CreatedAt:  time.Now(),
+	}
+	if err := dao.DB.Create(&history).Error; err != nil {
+		return err
+	}
+	dao.DB.Create(&model.Message{
+		UserID:    0,
+		Type:      "device",
+		Title:     fmt.Sprintf("设备事件: %s", eventName),
+		Content:   fmt.Sprintf("设备 %s 上报事件 %s", deviceSN, eventName),
+		ExtraJSON: fmt.Sprintf(`{"device_sn":"%s","event_id":"%s"}`, deviceSN, eventID),
+		CreatedAt: time.Now(),
+	})
+	return nil
+}
+
+// ListDeviceEvents 设备事件历史
+func ListDeviceEvents(deviceSN, eventID string, page, size int) (int64, []model.DeviceEventHistory, error) {
+	var total int64
+	var list []model.DeviceEventHistory
+	q := dao.DB.Where("device_sn = ?", deviceSN)
+	if eventID != "" {
+		q = q.Where("event_id = ?", eventID)
+	}
+	q.Model(&model.DeviceEventHistory{}).Count(&total)
+	err := q.Order("id desc").Offset((page-1)*size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// ========== 服务 ==========
+
+// InvokeDeviceService 云端调用设备服务
+func InvokeDeviceService(deviceSN, serviceID, serviceName, inputJSON string) (*model.DeviceServiceHistory, error) {
+	history := model.DeviceServiceHistory{
+		DeviceSN:    deviceSN,
+		ServiceID:   serviceID,
+		ServiceName: serviceName,
+		InputJSON:   inputJSON,
+		Status:      "success",
+		CreatedAt:   time.Now(),
+	}
+	if err := dao.DB.Create(&history).Error; err != nil {
+		return nil, err
+	}
+	return &history, nil
+}
+
+// ListDeviceServiceHistory 设备服务调用历史
+func ListDeviceServiceHistory(deviceSN, serviceID string, page, size int) (int64, []model.DeviceServiceHistory, error) {
+	var total int64
+	var list []model.DeviceServiceHistory
+	q := dao.DB.Where("device_sn = ?", deviceSN)
+	if serviceID != "" {
+		q = q.Where("service_id = ?", serviceID)
+	}
+	q.Model(&model.DeviceServiceHistory{}).Count(&total)
+	err := q.Order("id desc").Offset((page-1)*size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// ========== 设备影子 ==========
+
+// GetDeviceShadow 获取设备影子
+func GetDeviceShadow(deviceSN string) (*model.DeviceShadow, error) {
+	var shadow model.DeviceShadow
+	err := dao.DB.Where("device_sn = ?", deviceSN).First(&shadow).Error
+	if err == gorm.ErrRecordNotFound {
+		shadow = model.DeviceShadow{
+			DeviceSN:     deviceSN,
+			DesiredJSON:  "{}",
+			ReportedJSON: "{}",
+		}
+		return &shadow, nil
+	}
+	return &shadow, err
+}
+
+// UpdateDeviceShadowDesired 更新设备影子期望值
+func UpdateDeviceShadowDesired(deviceSN string, desired map[string]interface{}) error {
+	desiredJSON, _ := json.Marshal(desired)
+	var shadow model.DeviceShadow
+	err := dao.DB.Where("device_sn = ?", deviceSN).First(&shadow).Error
+	if err == gorm.ErrRecordNotFound {
+		shadow = model.DeviceShadow{
+			DeviceSN:     deviceSN,
+			DesiredJSON:  string(desiredJSON),
+			ReportedJSON: "{}",
+			Version:      1,
+		}
+		return dao.DB.Create(&shadow).Error
+	}
+	shadow.DesiredJSON = string(desiredJSON)
+	shadow.Version++
+	return dao.DB.Save(&shadow).Error
+}
+
+// SyncDeviceShadowReported 同步设备上报值到影子
+func SyncDeviceShadowReported(deviceSN string, reported map[string]interface{}) {
+	reportedJSON, _ := json.Marshal(reported)
+	var shadow model.DeviceShadow
+	if err := dao.DB.Where("device_sn = ?", deviceSN).First(&shadow).Error; err != nil {
+		shadow = model.DeviceShadow{
+			DeviceSN:     deviceSN,
+			DesiredJSON:  "{}",
+			ReportedJSON: string(reportedJSON),
+		}
+		dao.DB.Create(&shadow)
+		return
+	}
+	shadow.ReportedJSON = string(reportedJSON)
+	shadow.Version++
+	dao.DB.Save(&shadow)
+}
+
+// ========== 物模型导入导出 ==========
+
+// ExportThingModel 导出飞燕标准物模型 JSON
+func ExportThingModel(productID uint) (map[string]interface{}, error) {
+	var p model.Product
+	if err := dao.DB.First(&p, productID).Error; err != nil {
+		return nil, errors.New("产品不存在")
+	}
+	var properties, events, services interface{}
+	json.Unmarshal([]byte(p.PropertiesJSON), &properties)
+	json.Unmarshal([]byte(p.EventsJSON), &events)
+	json.Unmarshal([]byte(p.ServicesJSON), &services)
+
+	return map[string]interface{}{
+		"product_key": p.ProductKey,
+		"name":        p.Name,
+		"description": p.Description,
+		"category":    p.Category,
+		"properties":  properties,
+		"events":      events,
+		"services":    services,
+	}, nil
+}
+
+// ImportThingModel 导入飞燕标准物模型 JSON
+func ImportThingModel(productID uint, data map[string]interface{}) error {
+	var p model.Product
+	if err := dao.DB.First(&p, productID).Error; err != nil {
+		return errors.New("产品不存在")
+	}
+	var devCount int64
+	dao.DB.Model(&model.Device{}).Where("product_id = ?", productID).Count(&devCount)
+	if devCount > 0 {
+		return errors.New("产品下已有设备，物模型结构锁定，不可修改")
+	}
+
+	if props, ok := data["properties"]; ok {
+		b, _ := json.Marshal(props)
+		p.PropertiesJSON = string(b)
+	}
+	if events, ok := data["events"]; ok {
+		b, _ := json.Marshal(events)
+		p.EventsJSON = string(b)
+	}
+	if services, ok := data["services"]; ok {
+		b, _ := json.Marshal(services)
+		p.ServicesJSON = string(b)
+	}
+	if name, ok := data["name"].(string); ok && name != "" {
+		p.Name = name
+	}
+	if desc, ok := data["description"].(string); ok {
+		p.Description = desc
+	}
+	if cat, ok := data["category"].(string); ok {
+		p.Category = cat
+	}
+
+	return dao.DB.Save(&p).Error
+}
+
+// ValidatePropertyReport 校验设备上报属性是否符合物模型
+func ValidatePropertyReport(productID uint, params map[string]interface{}) []string {
+	var p model.Product
+	if err := dao.DB.First(&p, productID).Error; err != nil {
+		return nil
+	}
+	var specs []map[string]interface{}
+	if err := json.Unmarshal([]byte(p.PropertiesJSON), &specs); err != nil {
+		return nil
+	}
+	var warnings []string
+	for _, spec := range specs {
+		identifier, _ := spec["identifier"].(string)
+		if _, exists := params[identifier]; !exists {
+			continue
+		}
+		dt, _ := spec["dataType"].(map[string]interface{})
+		dataType, _ := dt["type"].(string)
+		specsMap, _ := dt["specs"].(map[string]interface{})
+
+		val := params[identifier]
+		switch dataType {
+		case "int", "float":
+			numVal, ok := val.(float64)
+			if !ok {
+				warnings = append(warnings, fmt.Sprintf("属性 %s 期望数值类型", identifier))
+				continue
+			}
+			if min, ok := specsMap["min"].(float64); ok && numVal < min {
+				warnings = append(warnings, fmt.Sprintf("属性 %s 值 %v 小于最小值 %v", identifier, numVal, min))
+			}
+			if max, ok := specsMap["max"].(float64); ok && numVal > max {
+				warnings = append(warnings, fmt.Sprintf("属性 %s 值 %v 大于最大值 %v", identifier, numVal, max))
+			}
+		case "bool":
+			if _, ok := val.(bool); !ok {
+				warnings = append(warnings, fmt.Sprintf("属性 %s 期望布尔类型", identifier))
+			}
+		case "enum":
+			enumVals, _ := specsMap["values"].([]interface{})
+			found := false
+			for _, ev := range enumVals {
+				if fmt.Sprintf("%v", ev) == fmt.Sprintf("%v", val) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				warnings = append(warnings, fmt.Sprintf("属性 %s 值 %v 不在枚举范围内", identifier, val))
+			}
+		}
+	}
+	return warnings
+}
+
 // ========== 管理员设备管理 ==========
 
 // UpdateAdminDevice 管理员更新设备
@@ -1554,4 +1812,920 @@ func DeleteAlertRule(id uint) error {
 // ToggleAlertRule 启用/禁用告警规则
 func ToggleAlertRule(id uint, enabled bool) error {
 	return dao.DB.Model(&model.AlertRule{}).Where("id = ?", id).Update("enabled", enabled).Error
+}
+
+// ========== 规则引擎/场景联动 ==========
+
+// RuleTrigger 规则触发条件
+type RuleTrigger struct {
+	Type       string `json:"type"`       // device_property / device_event / timer / manual
+	DeviceSN   string `json:"device_sn"`  // 设备序列号（设备级触发
+	ProductID  uint   `json:"product_id"` // 产品ID（产品级触发
+	Property   string `json:"property"`   // 属性标识符
+	Operator   string `json:"operator"`   // >, <, ==, >=, <=, !=, changed
+	Threshold  string `json:"threshold"`  // 阈值
+	EventID    string `json:"event_id"`   // 事件标识符
+	CronExpr   string `json:"cron_expr"`  // 定时表达式
+	Expression string `json:"expression"` // 复杂表达式
+}
+
+// RuleAction 规则执行动作
+type RuleAction struct {
+	Type        string                 `json:"type"`         // device_control / scene_run / notify / webhook / delay
+	DeviceSN    string                 `json:"device_sn"`    // 目标设备
+	Property    string                 `json:"property"`     // 设置的属性
+	Value       interface{}            `json:"value"`        // 设置的值
+	ServiceID   string                 `json:"service_id"`   // 调用的服务
+	ServiceName string                 `json:"service_name"` // 服务名称
+	Input       map[string]interface{} `json:"input"`        // 服务输入参数
+	SceneID     uint                   `json:"scene_id"`     // 执行的场景
+	Title       string                 `json:"title"`        // 通知标题
+	Content     string                 `json:"content"`      // 通知内容
+	NotifyType  string                 `json:"notify_type"`  // message / push / sms
+	WebhookURL  string                 `json:"webhook_url"`  // webhook地址
+	DelaySec    int                    `json:"delay_sec"`    // 延迟秒数
+}
+
+// CreateRule 创建规则
+func CreateRule(name, description, ruleType string, trigger RuleTrigger, actions []RuleAction, createdBy uint) (*model.Rule, error) {
+	triggerJSON, _ := json.Marshal(trigger)
+	actionJSON, _ := json.Marshal(actions)
+	r := &model.Rule{
+		Name:        name,
+		Description: description,
+		Type:        ruleType,
+		Enabled:     true,
+		TriggerJSON: string(triggerJSON),
+		ActionJSON:  string(actionJSON),
+		CreatedBy:   createdBy,
+	}
+	if err := dao.DB.Create(r).Error; err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// ListRules 规则列表
+func ListRules(page, size int) (int64, []model.Rule, error) {
+	var total int64
+	var list []model.Rule
+	q := dao.DB.Model(&model.Rule{})
+	q.Count(&total)
+	err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// GetRule 获取规则详情
+func GetRule(id uint) (*model.Rule, error) {
+	var r model.Rule
+	if err := dao.DB.First(&r, id).Error; err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// UpdateRule 更新规则
+func UpdateRule(id uint, name, description string, trigger RuleTrigger, actions []RuleAction, enabled bool) error {
+	triggerJSON, _ := json.Marshal(trigger)
+	actionJSON, _ := json.Marshal(actions)
+	return dao.DB.Model(&model.Rule{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"name":         name,
+		"description":  description,
+		"trigger_json": string(triggerJSON),
+		"action_json":  string(actionJSON),
+		"enabled":      enabled,
+	}).Error
+}
+
+// DeleteRule 删除规则
+func DeleteRule(id uint) error {
+	return dao.DB.Delete(&model.Rule{}, id).Error
+}
+
+// ToggleRule 启用/禁用规则
+func ToggleRule(id uint, enabled bool) error {
+	return dao.DB.Model(&model.Rule{}).Where("id = ?", id).Update("enabled", enabled).Error
+}
+
+// EvaluateRule 评估并执行规则
+func EvaluateRule(triggerData map[string]interface{}) {
+	var rules []model.Rule
+	dao.DB.Where("enabled = ?", true).Find(&rules)
+
+	for _, rule := range rules {
+		if matchTrigger(rule, triggerData) {
+			executeRule(rule, triggerData)
+		}
+	}
+}
+
+func matchTrigger(rule model.Rule, data map[string]interface{}) bool {
+	var trigger RuleTrigger
+	json.Unmarshal([]byte(rule.TriggerJSON), &trigger)
+
+	switch trigger.Type {
+	case "device_property":
+		// 属性触发：检查设备上报的属性值
+		if data["type"] != "property_report" {
+			return false
+		}
+		if trigger.DeviceSN != "" && data["device_sn"] != trigger.DeviceSN {
+			return false
+		}
+		if trigger.ProductID > 0 && data["product_id"] != trigger.ProductID {
+			return false
+		}
+		if trigger.Property != "" {
+			if props, ok := data["properties"].(map[string]interface{}); ok {
+				val := props[trigger.Property]
+				return compareValue(val, trigger.Operator, trigger.Threshold)
+			}
+		}
+		return true
+
+	case "device_event":
+		// 事件触发
+		if data["type"] != "event_report" {
+			return false
+		}
+		if trigger.DeviceSN != "" && data["device_sn"] != trigger.DeviceSN {
+			return false
+		}
+		if trigger.EventID != "" && data["event_id"] != trigger.EventID {
+			return false
+		}
+		return true
+
+	case "timer":
+		// 定时触发由外部调度器处理
+		return false
+
+	case "manual":
+		// 手动触发
+		return data["manual_trigger"] == true && data["rule_id"] == rule.ID
+
+	default:
+		return false
+	}
+}
+
+func compareValue(val interface{}, operator, threshold string) bool {
+	if val == nil {
+		return false
+	}
+	// 尝试转为数值比较
+	var fVal float64
+	switch v := val.(type) {
+	case float64:
+		fVal = v
+	case int:
+		fVal = float64(v)
+	case string:
+		fVal, _ = strconv.ParseFloat(v, 64)
+	default:
+		return false
+	}
+	fThresh, _ := strconv.ParseFloat(threshold, 64)
+
+	switch operator {
+	case ">":
+		return fVal > fThresh
+	case "<":
+		return fVal < fThresh
+	case ">=":
+		return fVal >= fThresh
+	case "<=":
+		return fVal <= fThresh
+	case "==":
+		return fVal == fThresh
+	case "!=":
+		return fVal != fThresh
+	case "changed":
+		return true // 只要上报就触发
+	default:
+		return false
+	}
+}
+
+func executeRule(rule model.Rule, triggerData map[string]interface{}) {
+	var actions []RuleAction
+	json.Unmarshal([]byte(rule.ActionJSON), &actions)
+
+	execution := &model.RuleExecution{
+		RuleID:      rule.ID,
+		TriggeredAt: time.Now(),
+		Success:     true,
+		DetailJSON:  "",
+	}
+	detail := map[string]interface{}{"actions": []map[string]interface{}{}}
+
+	for _, action := range actions {
+		actionDetail := map[string]interface{}{"type": action.Type, "success": true}
+		var err error
+
+		switch action.Type {
+		case "device_control":
+			// 设备属性控制
+			if action.DeviceSN != "" && action.Property != "" {
+				// 通过 SN 查找设备
+				var d model.Device
+				if err = dao.DB.Where("device_sn = ?", action.DeviceSN).First(&d).Error; err == nil {
+					params := map[string]interface{}{action.Property: action.Value}
+					err = ControlDevice(0, "admin", d.ID, params, nil)
+				} else {
+					err = errors.New("设备不存在: " + action.DeviceSN)
+				}
+			}
+
+		case "device_service":
+			// 调用设备服务
+			if action.DeviceSN != "" && action.ServiceID != "" {
+				inputJSON := "{}"
+				if action.Input != nil {
+					ib, _ := json.Marshal(action.Input)
+					inputJSON = string(ib)
+				}
+				_, err = InvokeDeviceService(action.DeviceSN, action.ServiceID, action.ServiceName, inputJSON)
+			}
+
+		case "scene_run":
+			// 执行场景
+			if action.SceneID > 0 {
+				err = RunScene(action.SceneID, nil)
+			}
+
+		case "notify":
+			// 发送站内消息
+			err = sendRuleNotification(action.Title, action.Content, action.NotifyType)
+
+		case "webhook":
+			// 调用 Webhook
+			err = callWebhook(action.WebhookURL, triggerData, rule)
+
+		case "delay":
+			// 延迟（仅记录，实际延迟由前端或调度器处理）
+			actionDetail["delay_sec"] = action.DelaySec
+		}
+
+		if err != nil {
+			execution.Success = false
+			execution.ErrorMsg = err.Error()
+			actionDetail["success"] = false
+			actionDetail["error"] = err.Error()
+		}
+
+		detail["actions"] = append(detail["actions"].([]map[string]interface{}), actionDetail)
+	}
+
+	detailJSON, _ := json.Marshal(detail)
+	execution.DetailJSON = string(detailJSON)
+
+	// 更新规则统计
+	dao.DB.Model(&rule).Updates(map[string]interface{}{
+		"last_run_at": time.Now(),
+		"run_count":   gorm.Expr("run_count + 1"),
+	})
+
+	dao.DB.Create(execution)
+}
+
+// 辅助函数
+func sendRuleNotification(title, content, notifyType string) error {
+	// 这里可以集成推送服务，暂存为系统消息给管理员
+	var admin model.User
+	dao.DB.Where("role = ?", "admin").First(&admin)
+	if admin.ID > 0 {
+		msg := &model.Message{
+			UserID: admin.ID,
+			Type:   "rule",
+			Title:  title,
+			Content: content,
+		}
+		dao.DB.Create(msg)
+	}
+	return nil
+}
+
+func callWebhook(url string, triggerData map[string]interface{}, rule model.Rule) error {
+	payload := map[string]interface{}{
+		"rule_id":    rule.ID,
+		"rule_name":  rule.Name,
+		"triggered_at": time.Now().Format(time.RFC3339),
+		"trigger_data": triggerData,
+	}
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return errors.New("webhook returned status: " + strconv.Itoa(resp.StatusCode))
+	}
+	return nil
+}
+
+// 规则执行记录
+func ListRuleExecutions(ruleID uint, page, size int) (int64, []model.RuleExecution, error) {
+	var total int64
+	var list []model.RuleExecution
+	q := dao.DB.Model(&model.RuleExecution{})
+	if ruleID > 0 {
+		q = q.Where("rule_id = ?", ruleID)
+	}
+	q.Count(&total)
+	err := q.Order("triggered_at desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// ========== 设备分组 ==========
+
+// CreateDeviceGroup 创建设备分组
+func CreateDeviceGroup(name, description string, productID, ownerID uint) (*model.DeviceGroup, error) {
+	g := &model.DeviceGroup{
+		Name:        name,
+		Description: description,
+		ProductID:   productID,
+		OwnerID:     ownerID,
+	}
+	if err := dao.DB.Create(g).Error; err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// ListDeviceGroups 分组列表
+func ListDeviceGroups(productID, ownerID uint, page, size int) (int64, []model.DeviceGroup, error) {
+	var total int64
+	var list []model.DeviceGroup
+	q := dao.DB.Model(&model.DeviceGroup{})
+	if productID > 0 {
+		q = q.Where("product_id = ?", productID)
+	}
+	if ownerID > 0 {
+		q = q.Where("owner_id = ?", ownerID)
+	}
+	q.Count(&total)
+	err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// AddDeviceToGroup 添加设备到分组
+func AddDeviceToGroup(groupID, deviceID uint) error {
+	return dao.DB.Create(&model.DeviceGroupMember{GroupID: groupID, DeviceID: deviceID}).Error
+}
+
+// RemoveDeviceFromGroup 从分组移除设备
+func RemoveDeviceFromGroup(groupID, deviceID uint) error {
+	return dao.DB.Delete(&model.DeviceGroupMember{}, "group_id = ? AND device_id = ?", groupID, deviceID).Error
+}
+
+// ListGroupDevices 获取分组内设备
+func ListGroupDevices(groupID uint) ([]model.Device, error) {
+	var devices []model.Device
+	err := dao.DB.Table("devices").
+		Joins("JOIN device_group_members ON devices.id = device_group_members.device_id").
+		Where("device_group_members.group_id = ?", groupID).
+		Find(&devices).Error
+	return devices, err
+}
+
+// ========== 设备标签 ==========
+
+// SetDeviceTag 设置设备标签
+func SetDeviceTag(deviceID uint, key, value string) error {
+	tag := model.DeviceTag{DeviceID: deviceID, Key: key, Value: value}
+	return dao.DB.Where("device_id = ? AND key = ?", deviceID, key).
+		Assign(tag).FirstOrCreate(&tag).Error
+}
+
+// GetDeviceTags 获取设备标签
+func GetDeviceTags(deviceID uint) ([]model.DeviceTag, error) {
+	var tags []model.DeviceTag
+	err := dao.DB.Where("device_id = ?", deviceID).Find(&tags).Error
+	return tags, err
+}
+
+// DeleteDeviceTag 删除设备标签
+func DeleteDeviceTag(deviceID uint, key string) error {
+	return dao.DB.Delete(&model.DeviceTag{}, "device_id = ? AND key = ?", deviceID, key).Error
+}
+
+// SearchDevicesByTag 标签搜索设备
+func SearchDevicesByTag(key, value string) ([]model.Device, error) {
+	var devices []model.Device
+	err := dao.DB.Table("devices").
+		Joins("JOIN device_tags ON devices.id = device_tags.device_id").
+		Where("device_tags.key = ? AND device_tags.value = ?", key, value).
+		Find(&devices).Error
+	return devices, err
+}
+
+// LogMqttMessage 记录 MQTT 报文
+func LogMqttMessage(deviceSN, topic, direction, payload string) {
+	msg := &model.MqttMessage{
+		DeviceSN:  deviceSN,
+		Topic:     topic,
+		Direction: direction,
+		Payload:   payload,
+	}
+	dao.DB.Create(msg)
+}
+
+// ========== 网关子设备管理 ==========
+
+// AddSubDevice 添加子设备到网关
+func AddSubDevice(gatewayID, subDeviceID uint) error {
+	var gateway model.Device
+	if err := dao.DB.First(&gateway, gatewayID).Error; err != nil {
+		return errors.New("网关设备不存在")
+	}
+	if gateway.NodeType != "gateway" {
+		return errors.New("该设备不是网关类型")
+	}
+
+	var subDevice model.Device
+	if err := dao.DB.First(&subDevice, subDeviceID).Error; err != nil {
+		return errors.New("子设备不存在")
+	}
+
+	// 更新子设备网关关联
+	subDevice.GatewayID = gatewayID
+	subDevice.NodeType = "sub_device"
+	if err := dao.DB.Save(&subDevice).Error; err != nil {
+		return err
+	}
+
+	// 创建拓扑关系
+	topo := &model.DeviceTopology{
+		GatewayID:  gatewayID,
+		SubDeviceID: subDeviceID,
+		Status:     "online",
+	}
+	return dao.DB.Create(topo).Error
+}
+
+// RemoveSubDevice 从网关移除子设备
+func RemoveSubDevice(gatewayID, subDeviceID uint) error {
+	// 删除拓扑关系
+	if err := dao.DB.Where("gateway_id = ? AND sub_device_id = ?", gatewayID, subDeviceID).Delete(&model.DeviceTopology{}).Error; err != nil {
+		return err
+	}
+
+	// 更新子设备
+	var subDevice model.Device
+	if err := dao.DB.First(&subDevice, subDeviceID).Error; err != nil {
+		return errors.New("子设备不存在")
+	}
+	subDevice.GatewayID = 0
+	subDevice.NodeType = "device"
+	return dao.DB.Save(&subDevice).Error
+}
+
+// ListGatewaySubDevices 获取网关下的子设备列表
+func ListGatewaySubDevices(gatewayID uint) ([]model.Device, error) {
+	var devices []model.Device
+	err := dao.DB.Table("devices").
+		Joins("JOIN device_topologies ON devices.id = device_topologies.sub_device_id").
+		Where("device_topologies.gateway_id = ?", gatewayID).
+		Find(&devices).Error
+	return devices, err
+}
+
+// GetDeviceTopology 获取设备拓扑信息
+func GetDeviceTopology(deviceID uint) (*model.DeviceTopology, error) {
+	var topo model.DeviceTopology
+	err := dao.DB.Where("gateway_id = ? OR sub_device_id = ?", deviceID, deviceID).First(&topo).Error
+	if err != nil {
+		return nil, err
+	}
+	return &topo, nil
+}
+
+// UpdateSubDeviceStatus 更新子设备在线状态
+func UpdateSubDeviceStatus(subDeviceID uint, status string) error {
+	return dao.DB.Model(&model.DeviceTopology{}).
+		Where("sub_device_id = ?", subDeviceID).
+		Update("status", status).Error
+}
+
+// BatchAddSubDevices 批量添加子设备
+func BatchAddSubDevices(gatewayID uint, subDeviceIDs []uint) error {
+	return dao.DB.Transaction(func(tx *gorm.DB) error {
+		var gateway model.Device
+		if err := tx.First(&gateway, gatewayID).Error; err != nil {
+			return errors.New("网关设备不存在")
+		}
+		if gateway.NodeType != "gateway" {
+			return errors.New("该设备不是网关类型")
+		}
+
+		for _, subID := range subDeviceIDs {
+			var subDevice model.Device
+			if err := tx.First(&subDevice, subID).Error; err != nil {
+				return errors.New("子设备不存在: " + strconv.Itoa(int(subID)))
+			}
+			subDevice.GatewayID = gatewayID
+			subDevice.NodeType = "sub_device"
+			if err := tx.Save(&subDevice).Error; err != nil {
+				return err
+			}
+
+			topo := &model.DeviceTopology{
+				GatewayID:   gatewayID,
+				SubDeviceID: subID,
+				Status:      "online",
+			}
+			if err := tx.Create(topo).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ========== 设备配网 ==========
+
+// CreateProvisioningConfig 创建配网配置
+func CreateProvisioningConfig(productID uint, method, bleConfig, softapConfig, qrcodeConfig string, createdBy uint) (*model.ProvisioningConfig, error) {
+	cfg := &model.ProvisioningConfig{
+		ProductID:    productID,
+		Method:       method,
+		BLEConfig:    bleConfig,
+		SoftAPConfig: softapConfig,
+		QRCodeConfig: qrcodeConfig,
+		CreatedBy:    createdBy,
+	}
+	if err := dao.DB.Create(cfg).Error; err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// GetProvisioningConfig 获取产品的配网配置
+func GetProvisioningConfig(productID uint) (*model.ProvisioningConfig, error) {
+	var cfg model.ProvisioningConfig
+	err := dao.DB.Where("product_id = ?", productID).First(&cfg).Error
+	if err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// UpdateProvisioningConfig 更新配网配置
+func UpdateProvisioningConfig(productID uint, method, bleConfig, softapConfig, qrcodeConfig string) error {
+	return dao.DB.Model(&model.ProvisioningConfig{}).
+		Where("product_id = ?", productID).
+		Updates(map[string]interface{}{
+			"method":        method,
+			"ble_config":    bleConfig,
+			"softap_config": softapConfig,
+			"qrcode_config": qrcodeConfig,
+		}).Error
+}
+
+// StartProvisioning 开始配网
+func StartProvisioning(productID uint, deviceSN, deviceName, method, ssid, bssid, pinCode string, createdBy uint) (*model.DeviceProvisioning, error) {
+	prov := &model.DeviceProvisioning{
+		ProductID:  productID,
+		DeviceSN:   deviceSN,
+		DeviceName: deviceName,
+		Method:     method,
+		Status:     "pending",
+		SSID:       ssid,
+		BSSID:      bssid,
+		PinCode:    pinCode,
+		CreatedBy:  createdBy,
+	}
+
+	// 根据方式生成配网凭证
+	switch method {
+	case "ble":
+		// 蓝牙配网：生成随机 PIN 码
+		if prov.PinCode == "" {
+			prov.PinCode = fmt.Sprintf("%06d", rand.Intn(1000000))
+		}
+	case "softap":
+		// SoftAP 配网：需要 SSID
+		if ssid == "" {
+			return nil, errors.New("SoftAP 配网需要提供 SSID")
+		}
+	case "qrcode":
+		// 扫码配网：生成二维码内容
+		prov.QRCode = fmt.Sprintf("https://iot.aliyun.com/provision?sn=%s&pk=%s", deviceSN, "")
+	case "zero":
+		// 零配：无需额外参数
+	}
+
+	if err := dao.DB.Create(prov).Error; err != nil {
+		return nil, err
+	}
+	return prov, nil
+}
+
+// GetProvisioningStatus 获取配网状态
+func GetProvisioningStatus(deviceSN string) (*model.DeviceProvisioning, error) {
+	var prov model.DeviceProvisioning
+	err := dao.DB.Where("device_sn = ?", deviceSN).Order("id desc").First(&prov).Error
+	if err != nil {
+		return nil, err
+	}
+	return &prov, nil
+}
+
+// CompleteProvisioning 完成配网（设备上线回调）
+func CompleteProvisioning(deviceSN string, success bool, errorMsg string) error {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":       "success",
+		"completed_at": &now,
+	}
+	if !success {
+		updates["status"] = "failed"
+		updates["error_msg"] = errorMsg
+	}
+	return dao.DB.Model(&model.DeviceProvisioning{}).
+		Where("device_sn = ? AND status = 'pending'", deviceSN).
+		Updates(updates).Error
+}
+
+// ListProvisioningRecords 配网记录列表
+func ListProvisioningRecords(productID uint, page, size int) (int64, []model.DeviceProvisioning, error) {
+	var total int64
+	var list []model.DeviceProvisioning
+	q := dao.DB.Model(&model.DeviceProvisioning{})
+	if productID > 0 {
+		q = q.Where("product_id = ?", productID)
+	}
+	q.Count(&total)
+	err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// GenerateDeviceQRCode 生成设备配网二维码
+func GenerateDeviceQRCode(deviceSN, productKey string) (string, error) {
+	// 生成配网二维码链接（飞燕标准）
+	qrContent := fmt.Sprintf("aliyun_iot://provision?sn=%s&pk=%s", deviceSN, productKey)
+	return qrContent, nil
+}
+
+// ========== 数据流转/SQL分析 ==========
+
+// CreateDataFlow 创建数据流转规则
+func CreateDataFlow(name, description, flowType, sourceType, sourceTopic, sql, targetType, targetTopic, targetConfig string, createdBy uint) (*model.DataFlow, error) {
+	df := &model.DataFlow{
+		Name:         name,
+		Description:  description,
+		Type:         flowType,
+		SourceType:   sourceType,
+		SourceTopic:  sourceTopic,
+		SQL:          sql,
+		TargetType:   targetType,
+		TargetTopic:  targetTopic,
+		TargetConfig: targetConfig,
+		Enabled:      true,
+		CreatedBy:    createdBy,
+	}
+	if err := dao.DB.Create(df).Error; err != nil {
+		return nil, err
+	}
+	return df, nil
+}
+
+// ListDataFlows 数据流转规则列表
+func ListDataFlows(page, size int) (int64, []model.DataFlow, error) {
+	var total int64
+	var list []model.DataFlow
+	q := dao.DB.Model(&model.DataFlow{})
+	q.Count(&total)
+	err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// GetDataFlow 获取数据流转规则详情
+func GetDataFlow(id uint) (*model.DataFlow, error) {
+	var df model.DataFlow
+	if err := dao.DB.First(&df, id).Error; err != nil {
+		return nil, err
+	}
+	return &df, nil
+}
+
+// UpdateDataFlow 更新数据流转规则
+func UpdateDataFlow(id uint, name, description, flowType, sourceType, sourceTopic, sql, targetType, targetTopic, targetConfig string, enabled bool) error {
+	return dao.DB.Model(&model.DataFlow{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"name":          name,
+		"description":   description,
+		"type":          flowType,
+		"source_type":   sourceType,
+		"source_topic":  sourceTopic,
+		"sql":           sql,
+		"target_type":   targetType,
+		"target_topic":  targetTopic,
+		"target_config": targetConfig,
+		"enabled":       enabled,
+	}).Error
+}
+
+// DeleteDataFlow 删除数据流转规则
+func DeleteDataFlow(id uint) error {
+	return dao.DB.Delete(&model.DataFlow{}, id).Error
+}
+
+// ToggleDataFlow 启用/禁用数据流转规则
+func ToggleDataFlow(id uint, enabled bool) error {
+	return dao.DB.Model(&model.DataFlow{}).Where("id = ?", id).Update("enabled", enabled).Error
+}
+
+// ExecuteDataFlow 执行数据流转（简化版，实际应由规则引擎调用）
+func ExecuteDataFlow(flowID uint, input map[string]interface{}) error {
+	df, err := GetDataFlow(flowID)
+	if err != nil {
+		return err
+	}
+	if !df.Enabled {
+		return nil
+	}
+
+	execution := &model.DataFlowExecution{
+		FlowID:    flowID,
+		Status:    "success",
+		InputJSON: "",
+	}
+	inputJSON, _ := json.Marshal(input)
+	execution.InputJSON = string(inputJSON)
+
+	var output interface{}
+	var execErr error
+
+	// 简化的 SQL 执行（实际应使用更完整的 SQL 引擎）
+	switch df.Type {
+	case "sql":
+		// 这里只是记录，实际 SQL 执行需要专门引擎
+		output = map[string]interface{}{"sql": df.SQL, "input": input}
+	case "republish":
+		// 重新发布到 MQTT
+		// 实际实现需要 EMQX 客户端
+		output = map[string]interface{}{"target_topic": df.TargetTopic, "data": input}
+	case "forward":
+		// 转发到 HTTP
+		output = map[string]interface{}{"forwarded": true, "data": input}
+	}
+
+	outputJSON, _ := json.Marshal(output)
+	execution.OutputJSON = string(outputJSON)
+
+	if execErr != nil {
+		execution.Status = "failed"
+		execution.ErrorMsg = execErr.Error()
+	}
+
+	dao.DB.Create(execution)
+	return execErr
+}
+
+// ListDataFlowExecutions 数据流转执行记录
+func ListDataFlowExecutions(flowID uint, page, size int) (int64, []model.DataFlowExecution, error) {
+	var total int64
+	var list []model.DataFlowExecution
+	q := dao.DB.Model(&model.DataFlowExecution{})
+	if flowID > 0 {
+		q = q.Where("flow_id = ?", flowID)
+	}
+	q.Count(&total)
+	err := q.Order("created_at desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// ========== 多协议网关 ==========
+
+// CreateProtocolGateway 创建协议网关
+func CreateProtocolGateway(name, gatewayType, host string, port int, config string, createdBy uint) (*model.ProtocolGateway, error) {
+	g := &model.ProtocolGateway{
+		Name:      name,
+		Type:      gatewayType,
+		Host:      host,
+		Port:      port,
+		Config:    config,
+		Enabled:   true,
+		CreatedBy: createdBy,
+	}
+	if err := dao.DB.Create(g).Error; err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// ListProtocolGateways 协议网关列表
+func ListProtocolGateways(page, size int) (int64, []model.ProtocolGateway, error) {
+	var total int64
+	var list []model.ProtocolGateway
+	q := dao.DB.Model(&model.ProtocolGateway{})
+	q.Count(&total)
+	err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// CreateProtocolMapping 创建协议映射
+func CreateProtocolMapping(gatewayID, productID uint, protocolKey, propertyID, dataType string, scale, offset float64) (*model.ProtocolMapping, error) {
+	m := &model.ProtocolMapping{
+		GatewayID:   gatewayID,
+		ProductID:   productID,
+		ProtocolKey: protocolKey,
+		PropertyID:  propertyID,
+		DataType:    dataType,
+		Scale:       scale,
+		Offset:      offset,
+	}
+	if err := dao.DB.Create(m).Error; err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// ListProtocolMappings 协议映射列表
+func ListProtocolMappings(gatewayID, productID uint) ([]model.ProtocolMapping, error) {
+	var list []model.ProtocolMapping
+	q := dao.DB.Model(&model.ProtocolMapping{})
+	if gatewayID > 0 {
+		q = q.Where("gateway_id = ?", gatewayID)
+	}
+	if productID > 0 {
+		q = q.Where("product_id = ?", productID)
+	}
+	err := q.Find(&list).Error
+	return list, err
+}
+
+// ========== 设备诊断/监控 ==========
+
+// CreateDeviceDiagnostic 创建设备诊断记录
+func CreateDeviceDiagnostic(deviceSN, diagType, level, title, detail string) (*model.DeviceDiagnostic, error) {
+	d := &model.DeviceDiagnostic{
+		DeviceSN: deviceSN,
+		Type:     diagType,
+		Level:    level,
+		Title:    title,
+		Detail:   detail,
+		Status:   "open",
+	}
+	if err := dao.DB.Create(d).Error; err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// ListDeviceDiagnostics 设备诊断列表
+func ListDeviceDiagnostics(deviceSN string, page, size int) (int64, []model.DeviceDiagnostic, error) {
+	var total int64
+	var list []model.DeviceDiagnostic
+	q := dao.DB.Model(&model.DeviceDiagnostic{})
+	if deviceSN != "" {
+		q = q.Where("device_sn = ?", deviceSN)
+	}
+	q.Count(&total)
+	err := q.Order("created_at desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// ResolveDeviceDiagnostic 解决诊断问题
+func ResolveDeviceDiagnostic(id uint) error {
+	now := time.Now()
+	return dao.DB.Model(&model.DeviceDiagnostic{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":      "resolved",
+		"resolved_at": &now,
+	}).Error
+}
+
+// GetDeviceMetrics 获取设备指标
+func GetDeviceMetrics(deviceSN string, days int) ([]model.DeviceMetrics, error) {
+	var list []model.DeviceMetrics
+	startDate := time.Now().AddDate(0, 0, -days)
+	err := dao.DB.Where("device_sn = ? AND date >= ?", deviceSN, startDate).Order("date desc").Find(&list).Error
+	return list, err
+}
+
+// RecordDeviceMetrics 记录设备指标（定时任务调用）
+func RecordDeviceMetrics(deviceSN string) error {
+	// 这里简化实现，实际应从 MQTT/Redis 统计
+	var metrics model.DeviceMetrics
+	today := time.Now().Truncate(24 * time.Hour)
+	err := dao.DB.Where("device_sn = ? AND date = ?", deviceSN, today).First(&metrics).Error
+	if err != nil {
+		// 创建新记录
+		metrics = model.DeviceMetrics{
+			DeviceSN: deviceSN,
+			Date:     today,
+		}
+	}
+	// 更新统计
+	metrics.MessageCount++
+	metrics.OnlineTime += 60 // 假设每分钟记录一次
+	if err := dao.DB.Save(&metrics).Error; err != nil {
+		return err
+	}
+	return nil
 }

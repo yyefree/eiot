@@ -156,6 +156,10 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 
 		// 设备历史数据（用户）
 		api.GET("/device/data/:sn", middleware.AuthMiddleware(sc.Config), wrap(sc, handleDeviceDataHistory))
+		// 设备数据上报（测试用）
+		api.POST("/device/report", middleware.AuthMiddleware(sc.Config), wrap(sc, handleDeviceReport))
+		// MQTT 报文记录（调试用）
+		api.GET("/device/mqtt/messages/:sn", middleware.AuthMiddleware(sc.Config), wrap(sc, handleMqttMessages))
 
 		// 管理员模块
 		admin := api.Group("/admin", middleware.AuthMiddleware(sc.Config), middleware.AdminMiddleware())
@@ -175,6 +179,8 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 			admin.DELETE("/product/:id", wrap(sc, handleDeleteProduct))
 			// 产品物模型
 			admin.PUT("/product/:id/thing-model", wrap(sc, handleUpdateProductThingModel))
+			admin.POST("/product/:id/thing-model/import", wrap(sc, handleImportThingModel))
+			admin.GET("/product/:id/thing-model/export", wrap(sc, handleExportThingModel))
 			// 产品移动端 UI
 			admin.GET("/product/:id/mobile-ui", wrap(sc, handleGetProductMobileUI))
 			admin.PUT("/product/:id/mobile-ui", wrap(sc, handleSaveProductMobileUI))
@@ -208,6 +214,67 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 
 			// 看板统计
 			admin.GET("/stats", wrap(sc, handleAdminStats))
+
+			// 规则引擎
+			admin.POST("/rule", wrap(sc, handleCreateRule))
+			admin.GET("/rule", wrap(sc, handleListRules))
+			admin.GET("/rule/:id", wrap(sc, handleGetRule))
+			admin.PUT("/rule/:id", wrap(sc, handleUpdateRule))
+			admin.DELETE("/rule/:id", wrap(sc, handleDeleteRule))
+			admin.PUT("/rule/:id/toggle", wrap(sc, handleToggleRule))
+			admin.GET("/rule/:id/execution", wrap(sc, handleListRuleExecutions))
+
+			// 设备分组
+			admin.POST("/device-group", wrap(sc, handleCreateDeviceGroup))
+			admin.GET("/device-group", wrap(sc, handleListDeviceGroups))
+			admin.POST("/device-group/:id/device", wrap(sc, handleAddDeviceToGroup))
+			admin.DELETE("/device-group/:id/device/:device_id", wrap(sc, handleRemoveDeviceFromGroup))
+			admin.GET("/device-group/:id/device", wrap(sc, handleListGroupDevices))
+
+			// 设备标签
+			admin.POST("/device/:id/tag", wrap(sc, handleSetDeviceTag))
+			admin.GET("/device/:id/tag", wrap(sc, handleGetDeviceTags))
+			admin.DELETE("/device/:id/tag/:key", wrap(sc, handleDeleteDeviceTag))
+			admin.GET("/device/tag/search", wrap(sc, handleSearchDevicesByTag))
+
+			// 网关子设备管理
+			admin.POST("/gateway/sub-device", wrap(sc, handleAddSubDevice))
+			admin.DELETE("/gateway/sub-device", wrap(sc, handleRemoveSubDevice))
+			admin.GET("/gateway/:gateway_id/sub-devices", wrap(sc, handleListGatewaySubDevices))
+			admin.GET("/device/:id/topology", wrap(sc, handleGetDeviceTopology))
+			admin.PUT("/gateway/sub-device/status", wrap(sc, handleUpdateSubDeviceStatus))
+			admin.POST("/gateway/batch-sub-devices", wrap(sc, handleBatchAddSubDevices))
+
+			// 设备配网
+			admin.POST("/provisioning/config", wrap(sc, handleCreateProvisioningConfig))
+			admin.GET("/provisioning/config/:product_id", wrap(sc, handleGetProvisioningConfig))
+			admin.PUT("/provisioning/config/:product_id", wrap(sc, handleUpdateProvisioningConfig))
+			admin.POST("/provisioning/start", wrap(sc, handleStartProvisioning))
+			admin.GET("/provisioning/status/:sn", wrap(sc, handleGetProvisioningStatus))
+			admin.POST("/provisioning/complete", wrap(sc, handleCompleteProvisioning))
+			admin.GET("/provisioning/records", wrap(sc, handleListProvisioningRecords))
+			admin.GET("/provisioning/qrcode/:sn", wrap(sc, handleGenerateDeviceQRCode))
+
+			// 数据流转/SQL分析
+			admin.POST("/data-flow", wrap(sc, handleCreateDataFlow))
+			admin.GET("/data-flow", wrap(sc, handleListDataFlows))
+			admin.GET("/data-flow/:id", wrap(sc, handleGetDataFlow))
+			admin.PUT("/data-flow/:id", wrap(sc, handleUpdateDataFlow))
+			admin.DELETE("/data-flow/:id", wrap(sc, handleDeleteDataFlow))
+			admin.PUT("/data-flow/:id/toggle", wrap(sc, handleToggleDataFlow))
+			admin.GET("/data-flow/:id/execution", wrap(sc, handleListDataFlowExecutions))
+
+			// 多协议网关
+			admin.POST("/protocol-gateway", wrap(sc, handleCreateProtocolGateway))
+			admin.GET("/protocol-gateway", wrap(sc, handleListProtocolGateways))
+			admin.POST("/protocol-mapping", wrap(sc, handleCreateProtocolMapping))
+			admin.GET("/protocol-mapping", wrap(sc, handleListProtocolMappings))
+
+			// 设备诊断/监控
+			admin.POST("/device-diagnostic", wrap(sc, handleCreateDeviceDiagnostic))
+			admin.GET("/device-diagnostic", wrap(sc, handleListDeviceDiagnostics))
+			admin.PUT("/device-diagnostic/:id/resolve", wrap(sc, handleResolveDeviceDiagnostic))
+			admin.GET("/device/metrics/:sn", wrap(sc, handleGetDeviceMetrics))
 		}
 
 		// 设备绑定（用户
@@ -218,6 +285,14 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
     // 用户个人 UI
     api.GET("/device/:id/ui", middleware.AuthMiddleware(sc.Config), wrap(sc, handleGetUserDeviceUI))
     api.PUT("/device/:id/ui", middleware.AuthMiddleware(sc.Config), wrap(sc, handleSaveUserDeviceUI))
+
+		// 设备事件/服务/影子
+		api.POST("/device/:id/event", middleware.AuthMiddleware(sc.Config), wrap(sc, handleReportDeviceEvent))
+		api.GET("/device/:id/event", middleware.AuthMiddleware(sc.Config), wrap(sc, handleListDeviceEvents))
+		api.POST("/device/:id/service", middleware.AuthMiddleware(sc.Config), wrap(sc, handleInvokeDeviceService))
+		api.GET("/device/:id/service", middleware.AuthMiddleware(sc.Config), wrap(sc, handleListDeviceServices))
+		api.GET("/device/:id/shadow", middleware.AuthMiddleware(sc.Config), wrap(sc, handleGetDeviceShadow))
+		api.PUT("/device/:id/shadow", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUpdateDeviceShadow))
 
 		// 设备共享
 		share := api.Group("/device/share", middleware.AuthMiddleware(sc.Config))
@@ -321,6 +396,10 @@ func wrap(sc *svc.ServiceContext, h func(c *gin.Context, sc *svc.ServiceContext)
 		}
 		if err != nil {
 			if be, ok := err.(*BizError); ok {
+				c.JSON(be.HTTPCode, gin.H{"code": be.Code, "msg": be.Message, "data": nil})
+				return
+			}
+			if be, ok := err.(*logic.BizError); ok {
 				c.JSON(be.HTTPCode, gin.H{"code": be.Code, "msg": be.Message, "data": nil})
 				return
 			}
@@ -1406,6 +1485,22 @@ func handleDeviceDataHistory(c *gin.Context, sc *svc.ServiceContext) (interface{
 	return gin.H{"list": list, "total": len(list)}, nil
 }
 
+func handleDeviceReport(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	sn := sVal(b["sn"])
+	if sn == "" {
+		return nil, NewBizError(http.StatusBadRequest, 400, "sn 不能为空")
+	}
+	data, _ := b["data"].(map[string]interface{})
+	for k, v := range data {
+		logic.SaveDeviceData(sn, k, fmt.Sprintf("%v", v))
+	}
+	return gin.H{"reported": len(data)}, nil
+}
+
 // ========== 用户资料编辑 ==========
 
 func handleUpdateUserInfo(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
@@ -1541,4 +1636,759 @@ func handleListCategories(c *gin.Context, sc *svc.ServiceContext) (interface{}, 
 		{"id": 8, "name": "其他", "icon": "other", "product_count": 0},
 	}
 	return categories, nil
+}
+
+// ========== 物模型导入导出 ==========
+
+func handleImportThingModel(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return nil, logic.ImportThingModel(uint(id), b)
+}
+
+func handleExportThingModel(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return logic.ExportThingModel(uint(id))
+}
+
+// ========== 设备事件 ==========
+
+func handleReportDeviceEvent(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	var d model.Device
+	if err := dao.DB.First(&d, id).Error; err != nil {
+		return nil, errors.New("设备不存在")
+	}
+	outputJSON := "{}"
+	if v, ok := b["output"]; ok {
+		bJSON, _ := json.Marshal(v)
+		outputJSON = string(bJSON)
+	}
+	err = logic.ReportDeviceEvent(d.DeviceSN, sVal(b["event_id"]), sVal(b["event_name"]), outputJSON)
+	return nil, err
+}
+
+func handleListDeviceEvents(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	page, size := pageSize(c)
+	eventID := c.Query("event_id")
+	var d model.Device
+	if err := dao.DB.First(&d, id).Error; err != nil {
+		return nil, errors.New("设备不存在")
+	}
+	total, list, err := logic.ListDeviceEvents(d.DeviceSN, eventID, page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list, "page": page, "size": size}, nil
+}
+
+// ========== 设备服务 ==========
+
+func handleInvokeDeviceService(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	var d model.Device
+	if err := dao.DB.First(&d, id).Error; err != nil {
+		return nil, errors.New("设备不存在")
+	}
+	inputJSON := "{}"
+	if v, ok := b["input"]; ok {
+		ib, _ := json.Marshal(v)
+		inputJSON = string(ib)
+	}
+	history, err := logic.InvokeDeviceService(d.DeviceSN, sVal(b["service_id"]), sVal(b["service_name"]), inputJSON)
+	if err != nil {
+		return nil, err
+	}
+	if sc.EMQX != nil {
+		topic := fmt.Sprintf("/sys/cmd/%s", d.DeviceSN)
+		payload := map[string]interface{}{
+			"type":       "service",
+			"service_id": history.ServiceID,
+			"input":      b["input"],
+			"ts":         time.Now().Unix(),
+		}
+		data, _ := json.Marshal(payload)
+		sc.EMQX.Publish(topic, payload)
+		logic.LogMqttMessage(d.DeviceSN, topic, "down", string(data))
+	}
+	return history, nil
+}
+
+func handleListDeviceServices(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	page, size := pageSize(c)
+	serviceID := c.Query("service_id")
+	var d model.Device
+	if err := dao.DB.First(&d, id).Error; err != nil {
+		return nil, errors.New("设备不存在")
+	}
+	total, list, err := logic.ListDeviceServiceHistory(d.DeviceSN, serviceID, page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list, "page": page, "size": size}, nil
+}
+
+// ========== 设备影子 ==========
+
+func handleGetDeviceShadow(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var d model.Device
+	if err := dao.DB.First(&d, id).Error; err != nil {
+		return nil, errors.New("设备不存在")
+	}
+	return logic.GetDeviceShadow(d.DeviceSN)
+}
+
+func handleUpdateDeviceShadow(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	var d model.Device
+	if err := dao.DB.First(&d, id).Error; err != nil {
+		return nil, errors.New("设备不存在")
+	}
+	desired, _ := b["desired"].(map[string]interface{})
+	if desired == nil {
+		return nil, errors.New("desired 字段必须为对象")
+	}
+	return nil, logic.UpdateDeviceShadowDesired(d.DeviceSN, desired)
+}
+
+// ========== 规则引擎 ==========
+
+type ruleTriggerReq struct {
+	Type       string `json:"type"`
+	DeviceSN   string `json:"device_sn"`
+	ProductID  uint   `json:"product_id"`
+	Property   string `json:"property"`
+	Operator   string `json:"operator"`
+	Threshold  string `json:"threshold"`
+	EventID    string `json:"event_id"`
+	CronExpr   string `json:"cron_expr"`
+	Expression string `json:"expression"`
+}
+
+type ruleActionReq struct {
+	Type       string                 `json:"type"`
+	DeviceSN   string                 `json:"device_sn"`
+	Property   string                 `json:"property"`
+	Value      interface{}            `json:"value"`
+	ServiceID  string                 `json:"service_id"`
+	Input      map[string]interface{} `json:"input"`
+	SceneID    uint                   `json:"scene_id"`
+	Title      string                 `json:"title"`
+	Content    string                 `json:"content"`
+	NotifyType string                 `json:"notify_type"`
+	WebhookURL string                 `json:"webhook_url"`
+	DelaySec   int                    `json:"delay_sec"`
+}
+
+func handleCreateRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	var trigger ruleTriggerReq
+	var actions []ruleActionReq
+	triggerJSON, _ := json.Marshal(b["trigger"])
+	json.Unmarshal(triggerJSON, &trigger)
+	actionsJSON, _ := json.Marshal(b["actions"])
+	json.Unmarshal(actionsJSON, &actions)
+
+	logicActions := make([]logic.RuleAction, len(actions))
+	for i, a := range actions {
+		logicActions[i] = logic.RuleAction{
+			Type:       a.Type,
+			DeviceSN:   a.DeviceSN,
+			Property:   a.Property,
+			Value:      a.Value,
+			ServiceID:  a.ServiceID,
+			Input:      a.Input,
+			SceneID:    a.SceneID,
+			Title:      a.Title,
+			Content:    a.Content,
+			NotifyType: a.NotifyType,
+			WebhookURL: a.WebhookURL,
+			DelaySec:   a.DelaySec,
+		}
+	}
+
+	return logic.CreateRule(
+		sVal(b["name"]),
+		sVal(b["description"]),
+		sVal(b["type"]),
+		logic.RuleTrigger{
+			Type:       trigger.Type,
+			DeviceSN:   trigger.DeviceSN,
+			ProductID:  trigger.ProductID,
+			Property:   trigger.Property,
+			Operator:   trigger.Operator,
+			Threshold:  trigger.Threshold,
+			EventID:    trigger.EventID,
+			CronExpr:   trigger.CronExpr,
+			Expression: trigger.Expression,
+		},
+		logicActions,
+		middleware.UID(c),
+	)
+}
+
+func handleListRules(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	page, size := pageSize(c)
+	total, list, err := logic.ListRules(page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+func handleGetRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return logic.GetRule(uint(id))
+}
+
+func handleUpdateRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+
+	var trigger ruleTriggerReq
+	var actions []ruleActionReq
+	triggerJSON, _ := json.Marshal(b["trigger"])
+	json.Unmarshal(triggerJSON, &trigger)
+	actionsJSON, _ := json.Marshal(b["actions"])
+	json.Unmarshal(actionsJSON, &actions)
+
+	logicActions := make([]logic.RuleAction, len(actions))
+	for i, a := range actions {
+		logicActions[i] = logic.RuleAction{
+			Type:       a.Type,
+			DeviceSN:   a.DeviceSN,
+			Property:   a.Property,
+			Value:      a.Value,
+			ServiceID:  a.ServiceID,
+			Input:      a.Input,
+			SceneID:    a.SceneID,
+			Title:      a.Title,
+			Content:    a.Content,
+			NotifyType: a.NotifyType,
+			WebhookURL: a.WebhookURL,
+			DelaySec:   a.DelaySec,
+		}
+	}
+
+	enabled := true
+	if v, ok := b["enabled"].(bool); ok {
+		enabled = v
+	}
+
+	return nil, logic.UpdateRule(
+		uint(id),
+		sVal(b["name"]),
+		sVal(b["description"]),
+		logic.RuleTrigger{
+			Type:       trigger.Type,
+			DeviceSN:   trigger.DeviceSN,
+			ProductID:  trigger.ProductID,
+			Property:   trigger.Property,
+			Operator:   trigger.Operator,
+			Threshold:  trigger.Threshold,
+			EventID:    trigger.EventID,
+			CronExpr:   trigger.CronExpr,
+			Expression: trigger.Expression,
+		},
+		logicActions,
+		enabled,
+	)
+}
+
+func handleDeleteRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteRule(uint(id))
+}
+
+func handleToggleRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	enabled := true
+	if v, ok := b["enabled"].(bool); ok {
+		enabled = v
+	}
+	return nil, logic.ToggleRule(uint(id), enabled)
+}
+
+func handleListRuleExecutions(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	page, size := pageSize(c)
+	total, list, err := logic.ListRuleExecutions(uint(id), page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+// ========== 设备分组 ==========
+
+func handleCreateDeviceGroup(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return logic.CreateDeviceGroup(
+		sVal(b["name"]),
+		sVal(b["description"]),
+		uVal(b["product_id"], 0),
+		middleware.UID(c),
+	)
+}
+
+func handleListDeviceGroups(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	productID := uVal(c.Query("product_id"), 0)
+	ownerID := uVal(c.Query("owner_id"), 0)
+	page, size := pageSize(c)
+	total, list, err := logic.ListDeviceGroups(productID, ownerID, page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+func handleAddDeviceToGroup(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	groupID, _ := strconv.Atoi(c.Param("id"))
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	deviceID := uVal(b["device_id"], 0)
+	if deviceID == 0 {
+		return nil, errors.New("device_id 不能为空")
+	}
+	return nil, logic.AddDeviceToGroup(uint(groupID), deviceID)
+}
+
+func handleRemoveDeviceFromGroup(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	groupID, _ := strconv.Atoi(c.Param("id"))
+	deviceID, _ := strconv.Atoi(c.Param("device_id"))
+	return nil, logic.RemoveDeviceFromGroup(uint(groupID), uint(deviceID))
+}
+
+func handleListGroupDevices(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	groupID, _ := strconv.Atoi(c.Param("id"))
+	return logic.ListGroupDevices(uint(groupID))
+}
+
+// ========== 设备标签 ==========
+
+func handleSetDeviceTag(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	key := sVal(b["key"])
+	value := sVal(b["value"])
+	if key == "" {
+		return nil, errors.New("key 不能为空")
+	}
+	return nil, logic.SetDeviceTag(uint(id), key, value)
+}
+
+func handleGetDeviceTags(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return logic.GetDeviceTags(uint(id))
+}
+
+func handleDeleteDeviceTag(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	key := c.Param("key")
+	return nil, logic.DeleteDeviceTag(uint(id), key)
+}
+
+func handleSearchDevicesByTag(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	key := c.Query("key")
+	value := c.Query("value")
+	if key == "" || value == "" {
+		return nil, errors.New("key 和 value 不能为空")
+	}
+	return logic.SearchDevicesByTag(key, value)
+}
+
+func handleMqttMessages(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	sn := c.Param("sn")
+	limit := iVal(c.Query("limit"), 50)
+	direction := c.Query("direction")
+	topic := c.Query("topic")
+
+	var msgs []model.MqttMessage
+	q := dao.DB.Where("device_sn = ?", sn).Order("created_at desc").Limit(limit)
+	if direction != "" {
+		q = q.Where("direction = ?", direction)
+	}
+	if topic != "" {
+		q = q.Where("topic = ?", topic)
+	}
+	q.Find(&msgs)
+	return gin.H{"list": msgs, "total": len(msgs)}, nil
+}
+
+// ========== 网关子设备管理 ==========
+
+func handleAddSubDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	gatewayID := uVal(b["gateway_id"], 0)
+	subDeviceID := uVal(b["sub_device_id"], 0)
+	if gatewayID == 0 || subDeviceID == 0 {
+		return nil, errors.New("gateway_id 和 sub_device_id 不能为空")
+	}
+	return nil, logic.AddSubDevice(gatewayID, subDeviceID)
+}
+
+func handleRemoveSubDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	gatewayID := uVal(b["gateway_id"], 0)
+	subDeviceID := uVal(b["sub_device_id"], 0)
+	if gatewayID == 0 || subDeviceID == 0 {
+		return nil, errors.New("gateway_id 和 sub_device_id 不能为空")
+	}
+	return nil, logic.RemoveSubDevice(gatewayID, subDeviceID)
+}
+
+func handleListGatewaySubDevices(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	gatewayID, _ := strconv.Atoi(c.Param("gateway_id"))
+	return logic.ListGatewaySubDevices(uint(gatewayID))
+}
+
+func handleGetDeviceTopology(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	deviceID, _ := strconv.Atoi(c.Param("id"))
+	return logic.GetDeviceTopology(uint(deviceID))
+}
+
+func handleUpdateSubDeviceStatus(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	subDeviceID := uVal(b["sub_device_id"], 0)
+	status := sVal(b["status"])
+	if subDeviceID == 0 || status == "" {
+		return nil, errors.New("sub_device_id 和 status 不能为空")
+	}
+	return nil, logic.UpdateSubDeviceStatus(uint(subDeviceID), status)
+}
+
+func handleBatchAddSubDevices(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	gatewayID := uVal(b["gateway_id"], 0)
+	subDeviceIDsRaw, ok := b["sub_device_ids"].([]interface{})
+	if !ok || gatewayID == 0 || len(subDeviceIDsRaw) == 0 {
+		return nil, errors.New("gateway_id 和 sub_device_ids 不能为空")
+	}
+	subDeviceIDs := make([]uint, len(subDeviceIDsRaw))
+	for i, v := range subDeviceIDsRaw {
+		if f, ok := v.(float64); ok {
+			subDeviceIDs[i] = uint(f)
+		}
+	}
+	return nil, logic.BatchAddSubDevices(gatewayID, subDeviceIDs)
+}
+
+// ========== 设备配网 ==========
+
+func handleCreateProvisioningConfig(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return logic.CreateProvisioningConfig(
+		uVal(b["product_id"], 0),
+		sVal(b["method"]),
+		sVal(b["ble_config"]),
+		sVal(b["softap_config"]),
+		sVal(b["qrcode_config"]),
+		middleware.UID(c),
+	)
+}
+
+func handleGetProvisioningConfig(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	productID, _ := strconv.Atoi(c.Param("product_id"))
+	return logic.GetProvisioningConfig(uint(productID))
+}
+
+func handleUpdateProvisioningConfig(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	productID, _ := strconv.Atoi(c.Param("product_id"))
+	return nil, logic.UpdateProvisioningConfig(
+		uint(productID),
+		sVal(b["method"]),
+		sVal(b["ble_config"]),
+		sVal(b["softap_config"]),
+		sVal(b["qrcode_config"]),
+	)
+}
+
+func handleStartProvisioning(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return logic.StartProvisioning(
+		uVal(b["product_id"], 0),
+		sVal(b["device_sn"]),
+		sVal(b["device_name"]),
+		sVal(b["method"]),
+		sVal(b["ssid"]),
+		sVal(b["bssid"]),
+		sVal(b["pin_code"]),
+		middleware.UID(c),
+	)
+}
+
+func handleGetProvisioningStatus(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	sn := c.Param("sn")
+	return logic.GetProvisioningStatus(sn)
+}
+
+func handleCompleteProvisioning(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	success := true
+	if v, ok := b["success"].(bool); ok {
+		success = v
+	}
+	return nil, logic.CompleteProvisioning(
+		sVal(b["device_sn"]),
+		success,
+		sVal(b["error_msg"]),
+	)
+}
+
+func handleListProvisioningRecords(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	productID := uVal(c.Query("product_id"), 0)
+	page, size := pageSize(c)
+	total, list, err := logic.ListProvisioningRecords(productID, page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+func handleGenerateDeviceQRCode(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	deviceSN := c.Param("sn")
+	productKey := c.Query("product_key")
+	qrCode, err := logic.GenerateDeviceQRCode(deviceSN, productKey)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"qr_code": qrCode}, nil
+}
+
+// ========== 数据流转/SQL分析 ==========
+
+func handleCreateDataFlow(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return logic.CreateDataFlow(
+		sVal(b["name"]),
+		sVal(b["description"]),
+		sVal(b["type"]),
+		sVal(b["source_type"]),
+		sVal(b["source_topic"]),
+		sVal(b["sql"]),
+		sVal(b["target_type"]),
+		sVal(b["target_topic"]),
+		sVal(b["target_config"]),
+		middleware.UID(c),
+	)
+}
+
+func handleListDataFlows(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	page, size := pageSize(c)
+	total, list, err := logic.ListDataFlows(page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+func handleGetDataFlow(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return logic.GetDataFlow(uint(id))
+}
+
+func handleUpdateDataFlow(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	enabled := true
+	if v, ok := b["enabled"].(bool); ok {
+		enabled = v
+	}
+	return nil, logic.UpdateDataFlow(
+		uint(id),
+		sVal(b["name"]),
+		sVal(b["description"]),
+		sVal(b["type"]),
+		sVal(b["source_type"]),
+		sVal(b["source_topic"]),
+		sVal(b["sql"]),
+		sVal(b["target_type"]),
+		sVal(b["target_topic"]),
+		sVal(b["target_config"]),
+		enabled,
+	)
+}
+
+func handleDeleteDataFlow(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteDataFlow(uint(id))
+}
+
+func handleToggleDataFlow(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	enabled := true
+	if v, ok := b["enabled"].(bool); ok {
+		enabled = v
+	}
+	return nil, logic.ToggleDataFlow(uint(id), enabled)
+}
+
+func handleListDataFlowExecutions(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	page, size := pageSize(c)
+	total, list, err := logic.ListDataFlowExecutions(uint(id), page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+// ========== 多协议网关 ==========
+
+func handleCreateProtocolGateway(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return logic.CreateProtocolGateway(
+		sVal(b["name"]),
+		sVal(b["type"]),
+		sVal(b["host"]),
+		iVal(b["port"], 0),
+		sVal(b["config"]),
+		middleware.UID(c),
+	)
+}
+
+func handleListProtocolGateways(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	page, size := pageSize(c)
+	total, list, err := logic.ListProtocolGateways(page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+func handleCreateProtocolMapping(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return logic.CreateProtocolMapping(
+		uVal(b["gateway_id"], 0),
+		uVal(b["product_id"], 0),
+		sVal(b["protocol_key"]),
+		sVal(b["property_id"]),
+		sVal(b["data_type"]),
+		func() float64 { if v, ok := b["scale"].(float64); ok { return v }; return 1.0 }(),
+		func() float64 { if v, ok := b["offset"].(float64); ok { return v }; return 0.0 }(),
+	)
+}
+
+func handleListProtocolMappings(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	gatewayID := uVal(c.Query("gateway_id"), 0)
+	productID := uVal(c.Query("product_id"), 0)
+	return logic.ListProtocolMappings(gatewayID, productID)
+}
+
+// ========== 设备诊断/监控 ==========
+
+func handleCreateDeviceDiagnostic(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return logic.CreateDeviceDiagnostic(
+		sVal(b["device_sn"]),
+		sVal(b["type"]),
+		sVal(b["level"]),
+		sVal(b["title"]),
+		sVal(b["detail"]),
+	)
+}
+
+func handleListDeviceDiagnostics(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	deviceSN := c.Query("device_sn")
+	page, size := pageSize(c)
+	total, list, err := logic.ListDeviceDiagnostics(deviceSN, page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list}, nil
+}
+
+func handleResolveDeviceDiagnostic(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.ResolveDeviceDiagnostic(uint(id))
+}
+
+func handleGetDeviceMetrics(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	deviceSN := c.Param("sn")
+	days := iVal(c.Query("days"), 7)
+	metrics, err := logic.GetDeviceMetrics(deviceSN, days)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"metrics": metrics}, nil
 }

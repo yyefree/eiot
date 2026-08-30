@@ -209,49 +209,190 @@
         <el-form-item label="ProductKey"><el-input v-model="editing.product_key" placeholder="留空自动生成" /></el-form-item>
         <el-form-item label="产品描述"><el-input v-model="editing.description" type="textarea" :rows="2" /></el-form-item>
 
-        <el-divider>物模型 (properties)</el-divider>
+        <el-divider>物模型</el-divider>
 
-        <el-form-item label="属性列表">
-          <el-table :data="editing.properties" size="small" border style="width:100%" empty-text="暂无属性，点击下方按钮添加">
-            <el-table-column label="标识符" width="140">
-              <template #default="{ row }"><el-input v-model="row.identifier" size="small" placeholder="如 temperature" /></template>
-            </el-table-column>
-            <el-table-column label="名称" width="130">
-              <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="如 温度" /></template>
-            </el-table-column>
-            <el-table-column label="数据类型" width="120">
-              <template #default="{ row }">
-                <el-select v-model="row.dataType" size="small" style="width:100%">
-                  <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px; gap: 8px;">
+          <el-button v-if="editing.id" size="small" @click="exportThingModel">导出物模型</el-button>
+          <el-button v-if="editing.id" size="small" @click="importFileRef?.click()">导入物模型</el-button>
+          <input ref="importFileRef" type="file" accept=".json" style="display:none" @change="importThingModel" />
+        </div>
+
+        <el-tabs v-model="thingModelTab" type="border-card">
+          <!-- Properties Tab -->
+          <el-tab-pane label="属性 (Properties)" name="properties">
+            <el-table :data="editing.properties" size="small" border style="width:100%" empty-text="暂无属性，点击下方按钮添加" max-height="320">
+              <el-table-column label="标识符" width="130" fixed>
+                <template #default="{ row }"><el-input v-model="row.identifier" size="small" placeholder="如 temperature" /></template>
+              </el-table-column>
+              <el-table-column label="名称" width="110">
+                <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="如 温度" /></template>
+              </el-table-column>
+              <el-table-column label="数据类型" width="100">
+                <template #default="{ row }">
+                  <el-select v-model="row.dataType" size="small" style="width:100%">
+                    <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="枚举值" width="120" v-if="editing.properties.some(p => p.dataType === 'enum')">
+                <template #default="{ row }"><el-input v-model="row.enumValues" size="small" :disabled="row.dataType !== 'enum'" placeholder="0,1,2" /></template>
+              </el-table-column>
+              <el-table-column label="单位" width="70">
+                <template #default="{ row }"><el-input v-model="row.unit" size="small" /></template>
+              </el-table-column>
+              <el-table-column label="下限" width="75">
+                <template #default="{ row }"><el-input-number v-model="row.min" size="small" controls-position="right" style="width:100%" /></template>
+              </el-table-column>
+              <el-table-column label="上限" width="75">
+                <template #default="{ row }"><el-input-number v-model="row.max" size="small" controls-position="right" style="width:100%" /></template>
+              </el-table-column>
+              <el-table-column label="步长" width="65">
+                <template #default="{ row }"><el-input-number v-model="row.step" size="small" :min="0" controls-position="right" style="width:100%" /></template>
+              </el-table-column>
+              <el-table-column label="读写" width="80">
+                <template #default="{ row }">
+                  <el-select v-model="row.accessMode" size="small" style="width:100%">
+                    <el-option label="读" value="r" />
+                    <el-option label="写" value="w" />
+                    <el-option label="读写" value="rw" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="必选" width="55" align="center">
+                <template #default="{ row }"><el-checkbox v-model="row.required" size="small" /></template>
+              </el-table-column>
+              <el-table-column label="描述" width="120">
+                <template #default="{ row }"><el-input v-model="row.description" size="small" placeholder="可选描述" /></template>
+              </el-table-column>
+              <el-table-column label="操作" width="55" align="center" fixed="right">
+                <template #default="{ $index }">
+                  <el-button link type="danger" size="small" @click="editing.properties.splice($index, 1)"><el-icon><Delete /></el-icon></el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-button size="small" type="primary" style="margin-top: 10px" :icon="Plus" @click="addProperty()">添加属性</el-button>
+          </el-tab-pane>
+
+          <!-- Events Tab -->
+          <el-tab-pane label="事件 (Events)" name="events">
+            <div v-for="(ev, ei) in editing.events" :key="ei" style="border:1px solid #e4e7ed; border-radius:4px; padding:12px; margin-bottom:10px;">
+              <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+                <el-input v-model="ev.identifier" size="small" placeholder="标识符 如 alarm_01" style="width:160px" />
+                <el-input v-model="ev.name" size="small" placeholder="事件名称" style="width:140px" />
+                <el-select v-model="ev.type" size="small" placeholder="事件类型" style="width:100px">
+                  <el-option label="info" value="info" />
+                  <el-option label="warning" value="warning" />
+                  <el-option label="error" value="error" />
                 </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="单位" width="80">
-              <template #default="{ row }"><el-input v-model="row.unit" size="small" /></template>
-            </el-table-column>
-            <el-table-column label="下限" width="80">
-              <template #default="{ row }"><el-input-number v-model="row.min" size="small" controls-position="right" style="width:100%" /></template>
-            </el-table-column>
-            <el-table-column label="上限" width="80">
-              <template #default="{ row }"><el-input-number v-model="row.max" size="small" controls-position="right" style="width:100%" /></template>
-            </el-table-column>
-            <el-table-column label="读写" width="90">
-              <template #default="{ row }">
-                <el-select v-model="row.accessMode" size="small" style="width:100%">
-                  <el-option label="读" value="r" />
-                  <el-option label="写" value="w" />
-                  <el-option label="读写" value="rw" />
+                <el-input v-model="ev.description" size="small" placeholder="描述" style="flex:1" />
+                <el-button link type="danger" size="small" @click="editing.events.splice(ei, 1)"><el-icon><Delete /></el-icon></el-button>
+              </div>
+              <div style="margin-left:12px;">
+                <div style="font-size:12px; color:#909399; margin-bottom:4px;">输出参数 (outputParams)</div>
+                <el-table :data="ev.outputParams" size="small" border empty-text="暂无输出参数" style="width:100%">
+                  <el-table-column label="标识符" width="130">
+                    <template #default="{ row }"><el-input v-model="row.identifier" size="small" placeholder="param_id" /></template>
+                  </el-table-column>
+                  <el-table-column label="名称" width="110">
+                    <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="参数名称" /></template>
+                  </el-table-column>
+                  <el-table-column label="数据类型" width="100">
+                    <template #default="{ row }">
+                      <el-select v-model="row.dataType" size="small" style="width:100%">
+                        <el-option v-for="t in ['int','float','bool','string']" :key="t" :label="t" :value="t" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="单位" width="80">
+                    <template #default="{ row }"><el-input v-model="row.unit" size="small" /></template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="55" align="center">
+                    <template #default="{ $index }">
+                      <el-button link type="danger" size="small" @click="ev.outputParams.splice($index, 1)"><el-icon><Delete /></el-icon></el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-button size="small" style="margin-top:4px" :icon="Plus" @click="ev.outputParams.push({ identifier:'', name:'', dataType:'int', unit:'' })">添加参数</el-button>
+              </div>
+            </div>
+            <el-button size="small" type="primary" style="margin-top: 4px" :icon="Plus" @click="addEvent()">添加事件</el-button>
+          </el-tab-pane>
+
+          <!-- Services Tab -->
+          <el-tab-pane label="服务 (Services)" name="services">
+            <div v-for="(svc, si) in editing.services" :key="si" style="border:1px solid #e4e7ed; border-radius:4px; padding:12px; margin-bottom:10px;">
+              <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+                <el-input v-model="svc.identifier" size="small" placeholder="标识符 如 set_mode" style="width:160px" />
+                <el-input v-model="svc.name" size="small" placeholder="服务名称" style="width:140px" />
+                <el-select v-model="svc.callType" size="small" placeholder="调用方式" style="width:100px">
+                  <el-option label="同步" value="sync" />
+                  <el-option label="异步" value="async" />
                 </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="70" align="center">
-              <template #default="{ $index }">
-                <el-button link type="danger" size="small" @click="editing.properties.splice($index, 1)"><el-icon><Delete /></el-icon></el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-button size="small" type="primary" style="margin-top: 10px" :icon="Plus" @click="addProperty()">添加属性</el-button>
-        </el-form-item>
+                <el-input v-model="svc.description" size="small" placeholder="描述" style="flex:1" />
+                <el-button link type="danger" size="small" @click="editing.services.splice(si, 1)"><el-icon><Delete /></el-icon></el-button>
+              </div>
+              <div style="margin-left:12px;">
+                <div style="display:flex; gap:16px;">
+                  <div style="flex:1;">
+                    <div style="font-size:12px; color:#909399; margin-bottom:4px;">输入参数 (inputParams)</div>
+                    <el-table :data="svc.inputParams" size="small" border empty-text="暂无输入参数" style="width:100%">
+                      <el-table-column label="标识符" width="120">
+                        <template #default="{ row }"><el-input v-model="row.identifier" size="small" placeholder="param_id" /></template>
+                      </el-table-column>
+                      <el-table-column label="名称" width="100">
+                        <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="参数名称" /></template>
+                      </el-table-column>
+                      <el-table-column label="数据类型" width="90">
+                        <template #default="{ row }">
+                          <el-select v-model="row.dataType" size="small" style="width:100%">
+                            <el-option v-for="t in ['int','float','bool','string']" :key="t" :label="t" :value="t" />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="单位" width="70">
+                        <template #default="{ row }"><el-input v-model="row.unit" size="small" /></template>
+                      </el-table-column>
+                      <el-table-column label="操作" width="50" align="center">
+                        <template #default="{ $index }">
+                          <el-button link type="danger" size="small" @click="svc.inputParams.splice($index, 1)"><el-icon><Delete /></el-icon></el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                    <el-button size="small" style="margin-top:4px" :icon="Plus" @click="svc.inputParams.push({ identifier:'', name:'', dataType:'int', unit:'' })">添加参数</el-button>
+                  </div>
+                  <div style="flex:1;">
+                    <div style="font-size:12px; color:#909399; margin-bottom:4px;">输出参数 (outputParams)</div>
+                    <el-table :data="svc.outputParams" size="small" border empty-text="暂无输出参数" style="width:100%">
+                      <el-table-column label="标识符" width="120">
+                        <template #default="{ row }"><el-input v-model="row.identifier" size="small" placeholder="param_id" /></template>
+                      </el-table-column>
+                      <el-table-column label="名称" width="100">
+                        <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="参数名称" /></template>
+                      </el-table-column>
+                      <el-table-column label="数据类型" width="90">
+                        <template #default="{ row }">
+                          <el-select v-model="row.dataType" size="small" style="width:100%">
+                            <el-option v-for="t in ['int','float','bool','string']" :key="t" :label="t" :value="t" />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="单位" width="70">
+                        <template #default="{ row }"><el-input v-model="row.unit" size="small" /></template>
+                      </el-table-column>
+                      <el-table-column label="操作" width="50" align="center">
+                        <template #default="{ $index }">
+                          <el-button link type="danger" size="small" @click="svc.outputParams.splice($index, 1)"><el-icon><Delete /></el-icon></el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                    <el-button size="small" style="margin-top:4px" :icon="Plus" @click="svc.outputParams.push({ identifier:'', name:'', dataType:'int', unit:'' })">添加参数</el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <el-button size="small" type="primary" style="margin-top: 4px" :icon="Plus" @click="addService()">添加服务</el-button>
+          </el-tab-pane>
+        </el-tabs>
         <el-form-item v-if="editing.id && editing.has_devices">
           <el-alert type="warning" :closable="false" title="产品下已有设备，物模型结构锁定，不可修改" />
         </el-form-item>
@@ -307,9 +448,11 @@ const batchForm = ref({ count: 10, prefix: 'dev_' })
 const batchLoading = ref(false)
 const batchResult = ref([])
 
-const editing = ref({ id: null, name: '', product_key: '', description: '', properties: [], has_devices: false, project_id: null, network_type: 'wifi' })
+const editing = ref({ id: null, name: '', product_key: '', description: '', properties: [], events: [], services: [], has_devices: false, project_id: null, network_type: 'wifi' })
+const thingModelTab = ref('properties')
+const importFileRef = ref(null)
 
-const dataTypes = ['int', 'float', 'bool', 'string']
+const dataTypes = ['int', 'float', 'bool', 'string', 'enum']
 
 const netTypeLabel = (t) => ({ wifi: 'WiFi', ble: '蓝牙', cellular: '蜂窝', wifi_ble: 'WiFi+BLE' }[t] || t || 'WiFi')
 
@@ -342,19 +485,26 @@ const load = async () => {
 }
 
 const propertiesToJson = (props) => {
-  return props.map(p => ({
-    identifier: p.identifier,
-    name: p.name,
-    accessMode: p.accessMode || 'rw',
-    dataType: {
-      type: p.dataType || 'int',
-      specs: {
-        min: p.min,
-        max: p.max,
-        unit: p.unit || ''
+  return props.map(p => {
+    const spec = {
+      min: p.min,
+      max: p.max,
+      unit: p.unit || ''
+    }
+    if (p.step != null && p.step !== '') spec.step = p.step
+    if (p.dataType === 'enum' && p.enumValues) spec.enums = p.enumValues.split(',').map(v => v.trim())
+    return {
+      identifier: p.identifier,
+      name: p.name,
+      accessMode: p.accessMode || 'rw',
+      required: !!p.required,
+      description: p.description || '',
+      dataType: {
+        type: p.dataType || 'int',
+        specs: spec
       }
     }
-  }))
+  })
 }
 
 const propertiesFromJson = (arr) => {
@@ -366,12 +516,91 @@ const propertiesFromJson = (arr) => {
     unit: p.dataType?.specs?.unit || '',
     min: p.dataType?.specs?.min,
     max: p.dataType?.specs?.max,
-    accessMode: p.accessMode || 'rw'
+    step: p.dataType?.specs?.step,
+    accessMode: p.accessMode || 'rw',
+    required: !!p.required,
+    description: p.description || '',
+    enumValues: Array.isArray(p.dataType?.specs?.enums) ? p.dataType.specs.enums.join(',') : (p.dataType?.specs?.enumValues || '')
+  }))
+}
+
+const eventsToJson = (events) => {
+  return events.map(ev => ({
+    identifier: ev.identifier,
+    name: ev.name,
+    type: ev.type || 'info',
+    description: ev.description || '',
+    outputParams: (ev.outputParams || []).map(p => ({
+      identifier: p.identifier,
+      name: p.name,
+      dataType: p.dataType || 'int',
+      unit: p.unit || ''
+    }))
+  }))
+}
+
+const eventsFromJson = (arr) => {
+  if (!Array.isArray(arr)) return []
+  return arr.map(ev => ({
+    identifier: ev.identifier,
+    name: ev.name,
+    type: ev.type || 'info',
+    description: ev.description || '',
+    outputParams: (ev.outputParams || []).map(p => ({
+      identifier: p.identifier,
+      name: p.name,
+      dataType: p.dataType || 'int',
+      unit: p.unit || ''
+    }))
+  }))
+}
+
+const servicesToJson = (services) => {
+  return services.map(svc => ({
+    identifier: svc.identifier,
+    name: svc.name,
+    description: svc.description || '',
+    callType: svc.callType || 'sync',
+    inputParams: (svc.inputParams || []).map(p => ({
+      identifier: p.identifier,
+      name: p.name,
+      dataType: p.dataType || 'int',
+      unit: p.unit || ''
+    })),
+    outputParams: (svc.outputParams || []).map(p => ({
+      identifier: p.identifier,
+      name: p.name,
+      dataType: p.dataType || 'int',
+      unit: p.unit || ''
+    }))
+  }))
+}
+
+const servicesFromJson = (arr) => {
+  if (!Array.isArray(arr)) return []
+  return arr.map(svc => ({
+    identifier: svc.identifier,
+    name: svc.name,
+    description: svc.description || '',
+    callType: svc.callType || 'sync',
+    inputParams: (svc.inputParams || []).map(p => ({
+      identifier: p.identifier,
+      name: p.name,
+      dataType: p.dataType || 'int',
+      unit: p.unit || ''
+    })),
+    outputParams: (svc.outputParams || []).map(p => ({
+      identifier: p.identifier,
+      name: p.name,
+      dataType: p.dataType || 'int',
+      unit: p.unit || ''
+    }))
   }))
 }
 
 const openCreate = () => {
-  editing.value = { id: null, name: '', product_key: '', description: '', properties: [], has_devices: false, project_id: filterProject.value || null, network_type: 'wifi' }
+  editing.value = { id: null, name: '', product_key: '', description: '', properties: [], events: [], services: [], has_devices: false, project_id: filterProject.value || null, network_type: 'wifi' }
+  thingModelTab.value = 'properties'
   dialogVisible.value = true
 }
 
@@ -386,8 +615,11 @@ const openEdit = async (row) => {
       project_id: detail.project_id || null,
       network_type: detail.network_type || 'wifi',
       properties: propertiesFromJson(detail.properties || []),
+      events: eventsFromJson(detail.events || []),
+      services: servicesFromJson(detail.services || []),
       has_devices: !!detail.has_devices
     }
+    thingModelTab.value = 'properties'
     dialogVisible.value = true
   } catch (e) {
     ElMessage.error('加载产品详情失败')
@@ -415,7 +647,32 @@ const addProperty = () => {
     unit: '',
     min: 0,
     max: 100,
-    accessMode: 'rw'
+    step: 1,
+    accessMode: 'rw',
+    required: false,
+    description: '',
+    enumValues: ''
+  })
+}
+
+const addEvent = () => {
+  editing.value.events.push({
+    identifier: 'event_' + (editing.value.events.length + 1),
+    name: '事件',
+    type: 'info',
+    description: '',
+    outputParams: []
+  })
+}
+
+const addService = () => {
+  editing.value.services.push({
+    identifier: 'service_' + (editing.value.services.length + 1),
+    name: '服务',
+    description: '',
+    callType: 'sync',
+    inputParams: [],
+    outputParams: []
   })
 }
 
@@ -458,11 +715,44 @@ const exportCSV = () => {
   link.click()
 }
 
+const exportThingModel = async () => {
+  try {
+    const data = await request.get('/admin/product/' + editing.value.id + '/thing-model/export')
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'thing_model_' + editing.value.product_key + '.json'
+    link.click()
+    ElMessage.success('导出成功')
+  } catch (e) {
+    ElMessage.error('导出失败')
+  }
+}
+
+const importThingModel = async (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+    if (data.properties) editing.value.properties = propertiesFromJson(data.properties)
+    if (data.events) editing.value.events = eventsFromJson(data.events)
+    if (data.services) editing.value.services = servicesFromJson(data.services)
+    ElMessage.success('导入成功，请检查后保存')
+  } catch (err) {
+    ElMessage.error('导入失败：文件格式错误')
+  } finally {
+    e.target.value = ''
+  }
+}
+
 const submit = async () => {
   if (!editing.value.name) { ElMessage.warning('请输入产品名称'); return }
   saving.value = true
   try {
     const propsJson = JSON.stringify(propertiesToJson(editing.value.properties))
+    const eventsJson = JSON.stringify(eventsToJson(editing.value.events))
+    const servicesJson = JSON.stringify(servicesToJson(editing.value.services))
     if (editing.value.id) {
       await request.put('/admin/product/' + editing.value.id, {
         name: editing.value.name,
@@ -474,8 +764,8 @@ const submit = async () => {
       if (!editing.value.has_devices) {
         await request.put('/admin/product/' + editing.value.id + '/thing-model', {
           properties_json: propsJson,
-          events_json: '[]',
-          services_json: '[]'
+          events_json: eventsJson,
+          services_json: servicesJson
         })
       }
       ElMessage.success('更新成功')
@@ -486,8 +776,8 @@ const submit = async () => {
         icon: '',
         product_key: editing.value.product_key,
         properties_json: propsJson,
-        events_json: '[]',
-        services_json: '[]',
+        events_json: eventsJson,
+        services_json: servicesJson,
         project_id: editing.value.project_id || 0,
         network_type: editing.value.network_type || 'wifi'
       })

@@ -136,5 +136,41 @@ class ApiClient {
   static Future<ApiResponse> getDeviceDataHistory(String deviceSn, {String? property, int limit = 100}) =>
       get('/device/data/$deviceSn', params: { if (property != null) 'property': property, 'limit': limit });
 
+  static Future<ApiResponse> getDeviceEvents(int deviceId, {int page = 1, int size = 20, String? eventId}) async {
+    var path = '/device/$deviceId/event?page=$page&size=$size';
+    if (eventId != null && eventId.isNotEmpty) path += '&event_id=$eventId';
+    return get(path);
+  }
+
+  static Future<ApiResponse> reportDeviceEvent(int deviceId, String eventId, String eventName, Map<String, dynamic> output) async {
+    return post('/device/$deviceId/event', {
+      'event_id': eventId,
+      'event_name': eventName,
+      'output': output,
+    });
+  }
+
+  static Future<ApiResponse> getDeviceServices(int deviceId, {int page = 1, int size = 20, String? serviceId}) async {
+    var path = '/device/$deviceId/service?page=$page&size=$size';
+    if (serviceId != null && serviceId.isNotEmpty) path += '&service_id=$serviceId';
+    return get(path);
+  }
+
+  static Future<ApiResponse> invokeDeviceService(int deviceId, String serviceId, String serviceName, Map<String, dynamic> input) async {
+    return post('/device/$deviceId/service', {
+      'service_id': serviceId,
+      'service_name': serviceName,
+      'input': input,
+    });
+  }
+
+  static Future<ApiResponse> getDeviceShadow(int deviceId) async {
+    return get('/device/$deviceId/shadow');
+  }
+
+  static Future<ApiResponse> updateDeviceShadow(int deviceId, Map<String, dynamic> desired) async {
+    return put('/device/$deviceId/shadow', {'desired': desired});
+  }
+
   static Future<ApiResponse> healthCheck() => get('/health');
 }

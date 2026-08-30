@@ -4,6 +4,7 @@ import (
 	"eiot/internal/dao"
 	"eiot/internal/handler"
 	"eiot/internal/logic"
+	"eiot/internal/model"
 	"eiot/internal/svc"
 	"eiot/pkg/cache"
 	"eiot/pkg/config"
@@ -120,7 +121,12 @@ func main() {
 			if !ok {
 				params = body
 			}
-			logic.HandleDeviceReportByPKAndName(productKey, deviceName, params)
+			// 查找设备 SN 并记录 MQTT 报文
+			var d model.Device
+			if err := dao.DB.Where("product_key = ? AND device_name = ?", productKey, deviceName).First(&d).Error; err == nil {
+				logic.LogMqttMessage(d.DeviceSN, topic, "up", string(payload))
+				logic.HandleDeviceReportByPKAndName(productKey, deviceName, params)
+			}
 		})
 
 		// 飞燕标准 Topic：设备固件版本上报 /ota/device/inform/{productKey}/{deviceName}
@@ -139,7 +145,56 @@ func main() {
 				logic.HandleDeviceFirmwareReport(productKey, deviceName, ver)
 			}
 		})
-		log.Println("[EMQX] subscribed Feiyan-style topics: /sys/+/+/prop/post, /ota/device/inform/+/+")
+
+		// 飞燕标准 Topic：设备事件上报 /sys/{ProductKey}/{DeviceName}/event/post
+		_ = emqx.Subscribe("/sys/+/+/event/post", func(topic string, payload []byte) {
+			segs := strings.Split(strings.Trim(topic, "/"), "/")
+			if len(segs) < 4 {
+				return
+			}
+			productKey := segs[1]
+			deviceName := segs[2]
+			var body map[string]interface{}
+			if err := json.Unmarshal(payload, &body); err != nil {
+				return
+			}
+			eventId, _ := body["event_id"].(string)
+			eventName, _ := body["event_name"].(string)
+			output, _ := json.Marshal(body["output"])
+
+			var d model.Device
+			if err := dao.DB.Where("product_key = ? AND device_name = ?", productKey, deviceName).First(&d).Error; err != nil {
+				return
+			}
+			logic.LogMqttMessage(d.DeviceSN, topic, "up", string(payload))
+			logic.ReportDeviceEvent(d.DeviceSN, eventId, eventName, string(output))
+		})
+
+		// 飞燕标准 Topic：设备服务响应 /sys/{ProductKey}/{DeviceName}/service/{ServiceId}/reply
+		_ = emqx.Subscribe("/sys/+/+/service/+/reply", func(topic string, payload []byte) {
+			segs := strings.Split(strings.Trim(topic, "/"), "/")
+			if len(segs) < 6 {
+				return
+			}
+			serviceId := segs[4]
+			var body map[string]interface{}
+			if err := json.Unmarshal(payload, &body); err != nil {
+				return
+			}
+			productKey := segs[1]
+			deviceName := segs[2]
+			var d model.Device
+			if err := dao.DB.Where("product_key = ? AND device_name = ?", productKey, deviceName).First(&d).Error; err != nil {
+				return
+			}
+			logic.LogMqttMessage(d.DeviceSN, topic, "up", string(payload))
+			outputJSON, _ := json.Marshal(body["output"])
+			dao.DB.Model(&model.DeviceServiceHistory{}).
+				Where("device_sn = ? AND service_id = ? AND status = 'success'", d.DeviceSN, serviceId).
+				Update("output_json", string(outputJSON))
+		})
+
+		log.Println("[EMQX] subscribed Feiyan-style topics: /sys/+/+/prop/post, /ota/device/inform/+/+, /sys/+/+/event/post, /sys/+/+/service/+/reply")
 	}
 
 	sc := svc.NewServiceContext(&c)
