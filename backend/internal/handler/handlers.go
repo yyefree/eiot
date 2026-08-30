@@ -202,6 +202,66 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 			dash.POST("", wrap(sc, handleSaveDashboard))
 			dash.GET("", wrap(sc, handleListDashboard))
 		}
+
+		// ========== 家庭/房间/场景/消息（云智能App）==========
+		auth := middleware.AuthMiddleware(sc.Config)
+
+		// 家庭
+		home := api.Group("/home", auth)
+		{
+			home.POST("", wrap(sc, handleCreateHome))
+			home.GET("", wrap(sc, handleListHomes))
+			home.GET("/:id", wrap(sc, handleGetHomeDetail))
+			home.PUT("/:id", wrap(sc, handleUpdateHome))
+			home.DELETE("/:id", wrap(sc, handleDeleteHome))
+			home.POST("/:id/member", wrap(sc, handleAddHomeMember))
+			home.DELETE("/:id/member/:uid", wrap(sc, handleRemoveHomeMember))
+			home.GET("/:id/member", wrap(sc, handleListHomeMembers))
+		}
+
+		// 房间
+		room := api.Group("/room", auth)
+		{
+			room.POST("", wrap(sc, handleCreateRoom))
+			room.GET("", wrap(sc, handleListRooms))
+			room.PUT("/:id", wrap(sc, handleUpdateRoom))
+			room.DELETE("/:id", wrap(sc, handleDeleteRoom))
+			room.PUT("/reorder", wrap(sc, handleReorderRooms))
+			room.POST("/:id/device", wrap(sc, handleAddDeviceToRoom))
+			room.DELETE("/:id/device/:did", wrap(sc, handleRemoveDeviceFromRoom))
+			room.GET("/:id/device", wrap(sc, handleListRoomDevices))
+		}
+
+		// 场景
+		scene := api.Group("/scene", auth)
+		{
+			scene.POST("", wrap(sc, handleCreateScene))
+			scene.GET("", wrap(sc, handleListScenes))
+			scene.PUT("/:id", wrap(sc, handleUpdateScene))
+			scene.DELETE("/:id", wrap(sc, handleDeleteScene))
+			scene.PUT("/:id/toggle", wrap(sc, handleToggleScene))
+			scene.POST("/:id/run", wrap(sc, handleRunScene))
+			scene.POST("/:id/condition", wrap(sc, handleAddSceneCondition))
+			scene.DELETE("/:id/condition/:cid", wrap(sc, handleRemoveSceneCondition))
+			scene.POST("/:id/action", wrap(sc, handleAddSceneAction))
+			scene.DELETE("/:id/action/:aid", wrap(sc, handleRemoveSceneAction))
+			scene.PUT("/:id/action/reorder", wrap(sc, handleReorderSceneActions))
+		}
+
+		// 消息
+		msg := api.Group("/message", auth)
+		{
+			msg.GET("", wrap(sc, handleListMessages))
+			msg.GET("/unread", wrap(sc, handleUnreadCount))
+			msg.PUT("/:id/read", wrap(sc, handleMarkMessageRead))
+			msg.PUT("/read-all", wrap(sc, handleMarkAllRead))
+			msg.DELETE("/:id", wrap(sc, handleDeleteMessage))
+		}
+
+		// OTA 管理（Admin）
+		admin.POST("/ota", wrap(sc, handleCreateFirmware))
+		admin.GET("/ota", wrap(sc, handleListFirmwares))
+		admin.POST("/ota/:id/push", wrap(sc, handlePushOTA))
 	}
 }
 
@@ -292,11 +352,11 @@ func handleSendCode(c *gin.Context, sc *svc.ServiceContext) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	_, err = logic.SendCode(sVal(b["phone"]))
+	code, err := logic.SendCode(sVal(b["phone"]))
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"expire_sec": 600}, nil
+	return gin.H{"expire_sec": 600, "code": code}, nil
 }
 
 func handleLoginCode(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
@@ -875,4 +935,293 @@ func handleDeviceBindQR(c *gin.Context, sc *svc.ServiceContext) (interface{}, er
 		"device_sn":   d.DeviceSN,
 		"bind_url": fmt.Sprintf("eiot://bind?pk=%s&dn=%s&sn=%s", d.ProductKey, d.DeviceName, d.DeviceSN),
 	}, nil
+}
+
+// ========== 家庭管理 ==========
+
+func handleCreateHome(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	uid := middleware.UID(c)
+	return logic.CreateHome(sVal(b["name"]), sVal(b["address"]), sVal(b["icon"]), uid)
+}
+
+func handleListHomes(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	return logic.ListHomes(middleware.UID(c))
+}
+
+func handleGetHomeDetail(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	home, members, roomCount, err := logic.GetHomeDetail(uint(id))
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"home": home, "members": members, "room_count": roomCount}, nil
+}
+
+func handleUpdateHome(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.UpdateHome(uint(id), sVal(b["name"]), sVal(b["address"]), sVal(b["icon"]))
+}
+
+func handleDeleteHome(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteHome(uint(id))
+}
+
+func handleAddHomeMember(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	uid := uint(b["user_id"].(float64))
+	m, e := logic.AddHomeMember(uint(id), uid, sVal(b["role"]), sVal(b["nickname"]))
+	return m, e
+}
+
+func handleRemoveHomeMember(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	uid, _ := strconv.Atoi(c.Param("uid"))
+	return nil, logic.RemoveHomeMember(uint(id), uint(uid))
+}
+
+func handleListHomeMembers(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return logic.ListHomeMembers(uint(id))
+}
+
+// ========== 房间管理 ==========
+
+func handleCreateRoom(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	homeID := uint(b["home_id"].(float64))
+	sortOrder := 0
+	if v, ok := b["sort_order"].(float64); ok {
+		sortOrder = int(v)
+	}
+	return logic.CreateRoom(homeID, sVal(b["name"]), sVal(b["icon"]), sortOrder)
+}
+
+func handleListRooms(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	homeID, _ := strconv.Atoi(c.Query("home_id"))
+	return logic.ListRooms(uint(homeID))
+}
+
+func handleUpdateRoom(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.UpdateRoom(uint(id), sVal(b["name"]), sVal(b["icon"]))
+}
+
+func handleDeleteRoom(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteRoom(uint(id))
+}
+
+func handleReorderRooms(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	homeID := uint(b["home_id"].(float64))
+	items, _ := b["items"].([]interface{})
+	var ids []uint
+	for _, item := range items {
+		if m, ok := item.(map[string]interface{}); ok {
+			ids = append(ids, uint(m["id"].(float64)))
+		}
+	}
+	return nil, logic.ReorderRooms(homeID, ids)
+}
+
+func handleAddDeviceToRoom(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	deviceID := uint(b["device_id"].(float64))
+	return nil, logic.AddDeviceToRoom(uint(id), deviceID)
+}
+
+func handleRemoveDeviceFromRoom(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	did, _ := strconv.Atoi(c.Param("did"))
+	return nil, logic.RemoveDeviceFromRoom(uint(id), uint(did))
+}
+
+func handleListRoomDevices(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return logic.ListRoomDevices(uint(id))
+}
+
+// ========== 场景管理 ==========
+
+func handleCreateScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	homeID := uint(b["home_id"].(float64))
+	sortOrder := 0
+	if v, ok := b["sort_order"].(float64); ok {
+		sortOrder = int(v)
+	}
+	return logic.CreateScene(homeID, sVal(b["name"]), sVal(b["icon"]), sVal(b["type"]), sortOrder)
+}
+
+func handleListScenes(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	homeID, _ := strconv.Atoi(c.Query("home_id"))
+	return logic.ListScenes(uint(homeID))
+}
+
+func handleUpdateScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.UpdateScene(uint(id), sVal(b["name"]), sVal(b["icon"]), sVal(b["type"]))
+}
+
+func handleDeleteScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteScene(uint(id))
+}
+
+func handleToggleScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, _ := bodyMap(c)
+	id, _ := strconv.Atoi(c.Param("id"))
+	enabled := true
+	if v, ok := b["enabled"].(bool); ok {
+		enabled = v
+	}
+	return nil, logic.ToggleScene(uint(id), enabled)
+}
+
+func handleRunScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.RunScene(uint(id), sc.EMQX)
+}
+
+func handleAddSceneCondition(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	m, e := logic.AddSceneCondition(uint(id), sVal(b["type"]), sVal(b["config_json"]))
+	return m, e
+}
+
+func handleRemoveSceneCondition(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	cid, _ := strconv.Atoi(c.Param("cid"))
+	return nil, logic.RemoveSceneCondition(uint(cid))
+}
+
+func handleAddSceneAction(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	deviceID := uint(b["device_id"].(float64))
+	sortOrder := 0
+	if v, ok := b["sort_order"].(float64); ok {
+		sortOrder = int(v)
+	}
+	m, e := logic.AddSceneAction(uint(id), deviceID, sVal(b["action_json"]), sortOrder)
+	return m, e
+}
+
+func handleRemoveSceneAction(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	aid, _ := strconv.Atoi(c.Param("aid"))
+	return nil, logic.RemoveSceneAction(uint(aid))
+}
+
+func handleReorderSceneActions(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	sceneID := uint(b["scene_id"].(float64))
+	items, _ := b["items"].([]interface{})
+	var ids []uint
+	for _, item := range items {
+		if m, ok := item.(map[string]interface{}); ok {
+			ids = append(ids, uint(m["id"].(float64)))
+		}
+	}
+	return nil, logic.ReorderSceneActions(sceneID, ids)
+}
+
+// ========== 消息管理 ==========
+
+func handleListMessages(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	uid := middleware.UID(c)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	total, list, err := logic.ListMessages(uid, page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list, "page": page, "size": size}, nil
+}
+
+func handleUnreadCount(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	return logic.UnreadCount(middleware.UID(c))
+}
+
+func handleMarkMessageRead(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.MarkMessageRead(uint(id), middleware.UID(c))
+}
+
+func handleMarkAllRead(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	return nil, logic.MarkAllRead(middleware.UID(c))
+}
+
+func handleDeleteMessage(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteMessage(uint(id), middleware.UID(c))
+}
+
+// ========== OTA 管理 ==========
+
+func handleCreateFirmware(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	productID := uint(b["product_id"].(float64))
+	return logic.CreateFirmware(productID, sVal(b["version"]), sVal(b["changelog"]), sVal(b["file_url"]), int64(b["size"].(float64)), middleware.UID(c))
+}
+
+func handleListFirmwares(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	productID, _ := strconv.Atoi(c.Query("product_id"))
+	total, list, err := logic.ListFirmwares(uint(productID), page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list, "page": page, "size": size}, nil
+}
+
+func handlePushOTA(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.PushOTA(uint(id), sc.EMQX)
 }

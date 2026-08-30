@@ -38,6 +38,7 @@ class DeviceItem {
   final String productName;
   final bool online;
   final String createdAt;
+  final int? roomId;
 
   DeviceItem({
     required this.id,
@@ -48,6 +49,7 @@ class DeviceItem {
     this.productName = '',
     this.online = false,
     this.createdAt = '',
+    this.roomId,
   });
 
   factory DeviceItem.fromJson(Map<String, dynamic> json) {
@@ -60,6 +62,7 @@ class DeviceItem {
       productName: json['productName'] as String? ?? '',
       online: json['online'] as bool? ?? false,
       createdAt: json['createdAt'] as String? ?? '',
+      roomId: json['room_id'] as int?,
     );
   }
 }
@@ -125,4 +128,256 @@ class ThingProperty {
   bool get canWrite => accessMode.contains('w');
   bool get isBool => dataType == 'bool';
   bool get isNumber => dataType == 'int' || dataType == 'float' || dataType == 'double';
+}
+
+class Home {
+  final int id;
+  final String name;
+  final String address;
+  final int memberCount;
+  final bool isDefault;
+  final String createdAt;
+
+  Home({
+    required this.id,
+    this.name = '',
+    this.address = '',
+    this.memberCount = 1,
+    this.isDefault = false,
+    this.createdAt = '',
+  });
+
+  factory Home.fromJson(Map<String, dynamic> json) {
+    return Home(
+      id: json['id'] as int? ?? 0,
+      name: json['name'] as String? ?? '',
+      address: json['address'] as String? ?? '',
+      memberCount: json['member_count'] as int? ?? 1,
+      isDefault: json['is_default'] as bool? ?? false,
+      createdAt: json['createdAt'] as String? ?? '',
+    );
+  }
+}
+
+class HomeMember {
+  final int id;
+  final int userId;
+  final String nickname;
+  final String phone;
+  final String role;
+  final String joinedAt;
+
+  HomeMember({
+    required this.id,
+    this.userId = 0,
+    this.nickname = '',
+    this.phone = '',
+    this.role = 'member',
+    this.joinedAt = '',
+  });
+
+  factory HomeMember.fromJson(Map<String, dynamic> json) {
+    return HomeMember(
+      id: json['id'] as int? ?? 0,
+      userId: json['user_id'] as int? ?? 0,
+      nickname: json['nickname'] as String? ?? '',
+      phone: json['phone'] as String? ?? '',
+      role: json['role'] as String? ?? 'member',
+      joinedAt: json['joinedAt'] as String? ?? '',
+    );
+  }
+}
+
+class Room {
+  final int id;
+  final String name;
+  final String icon;
+  final int deviceCount;
+  final int sortOrder;
+
+  Room({
+    required this.id,
+    this.name = '',
+    this.icon = 'meeting_room',
+    this.deviceCount = 0,
+    this.sortOrder = 0,
+  });
+
+  factory Room.fromJson(Map<String, dynamic> json) {
+    return Room(
+      id: json['id'] as int? ?? 0,
+      name: json['name'] as String? ?? '',
+      icon: json['icon'] as String? ?? 'meeting_room',
+      deviceCount: json['device_count'] as int? ?? 0,
+      sortOrder: json['sort_order'] as int? ?? 0,
+    );
+  }
+}
+
+class Scene {
+  final int id;
+  final String name;
+  final String icon;
+  final String type;
+  final bool enabled;
+  final List<SceneCondition> conditions;
+  final List<SceneAction> actions;
+  final String createdAt;
+
+  Scene({
+    required this.id,
+    this.name = '',
+    this.icon = 'play_circle',
+    this.type = 'manual',
+    this.enabled = true,
+    this.conditions = const [],
+    this.actions = const [],
+    this.createdAt = '',
+  });
+
+  factory Scene.fromJson(Map<String, dynamic> json) {
+    return Scene(
+      id: json['id'] as int? ?? 0,
+      name: json['name'] as String? ?? '',
+      icon: json['icon'] as String? ?? 'play_circle',
+      type: json['type'] as String? ?? 'manual',
+      enabled: json['enabled'] as bool? ?? true,
+      conditions: (json['conditions'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => SceneCondition.fromJson(e))
+              .toList() ??
+          [],
+      actions: (json['actions'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => SceneAction.fromJson(e))
+              .toList() ??
+          [],
+      createdAt: json['createdAt'] as String? ?? '',
+    );
+  }
+}
+
+class SceneCondition {
+  final String type;
+  final String? deviceId;
+  final String? deviceName;
+  final String? property;
+  final String? operator;
+  final dynamic value;
+  final String? time;
+  final String? days;
+
+  SceneCondition({
+    this.type = 'device',
+    this.deviceId,
+    this.deviceName,
+    this.property,
+    this.operator,
+    this.value,
+    this.time,
+    this.days,
+  });
+
+  factory SceneCondition.fromJson(Map<String, dynamic> json) {
+    return SceneCondition(
+      type: json['type'] as String? ?? 'device',
+      deviceId: json['device_id']?.toString(),
+      deviceName: json['device_name'] as String?,
+      property: json['property'] as String?,
+      operator: json['operator'] as String?,
+      value: json['value'],
+      time: json['time'] as String?,
+      days: json['days'] as String?,
+    );
+  }
+}
+
+class SceneAction {
+  final String type;
+  final String? deviceId;
+  final String? deviceName;
+  final String? property;
+  final dynamic value;
+  final String? sceneId;
+
+  SceneAction({
+    this.type = 'device',
+    this.deviceId,
+    this.deviceName,
+    this.property,
+    this.value,
+    this.sceneId,
+  });
+
+  factory SceneAction.fromJson(Map<String, dynamic> json) {
+    return SceneAction(
+      type: json['type'] as String? ?? 'device',
+      deviceId: json['device_id']?.toString(),
+      deviceName: json['device_name'] as String?,
+      property: json['property'] as String?,
+      value: json['value'],
+      sceneId: json['scene_id']?.toString(),
+    );
+  }
+}
+
+class Message {
+  final int id;
+  final String type;
+  final String title;
+  final String content;
+  final bool read;
+  final String createdAt;
+
+  Message({
+    required this.id,
+    this.type = 'system',
+    this.title = '',
+    this.content = '',
+    this.read = false,
+    this.createdAt = '',
+  });
+
+  factory Message.fromJson(Map<String, dynamic> json) {
+    return Message(
+      id: json['id'] as int? ?? 0,
+      type: json['type'] as String? ?? 'system',
+      title: json['title'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+      read: json['read'] as bool? ?? false,
+      createdAt: json['createdAt'] as String? ?? '',
+    );
+  }
+}
+
+class OTAFirmware {
+  final int id;
+  final String version;
+  final String deviceModel;
+  final String changelog;
+  final int fileSize;
+  final String downloadUrl;
+  final String createdAt;
+
+  OTAFirmware({
+    required this.id,
+    this.version = '',
+    this.deviceModel = '',
+    this.changelog = '',
+    this.fileSize = 0,
+    this.downloadUrl = '',
+    this.createdAt = '',
+  });
+
+  factory OTAFirmware.fromJson(Map<String, dynamic> json) {
+    return OTAFirmware(
+      id: json['id'] as int? ?? 0,
+      version: json['version'] as String? ?? '',
+      deviceModel: json['device_model'] as String? ?? '',
+      changelog: json['changelog'] as String? ?? '',
+      fileSize: json['file_size'] as int? ?? 0,
+      downloadUrl: json['download_url'] as String? ?? '',
+      createdAt: json['createdAt'] as String? ?? '',
+    );
+  }
 }

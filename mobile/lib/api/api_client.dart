@@ -11,7 +11,7 @@ class ApiResponse {
 }
 
 class ApiClient {
-  static String _baseUrl = 'http://localhost:8080/api';
+  static String _baseUrl = 'http://192.168.1.9:8080/api';
   static String? _token;
 
   static String get baseUrl => _baseUrl;
@@ -19,7 +19,7 @@ class ApiClient {
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('eiot_token');
-    _baseUrl = prefs.getString('eiot_base_url') ?? 'http://localhost:8080/api';
+    _baseUrl = prefs.getString('eiot_base_url') ?? _baseUrl;
   }
 
   static Future<void> setBaseUrl(String url) async {
@@ -100,4 +100,33 @@ class ApiClient {
       return ApiResponse(code: -1, msg: '网络错误 (${resp.statusCode})', data: null);
     }
   }
+
+  static Future<ApiResponse> getHomeList() => get('/home');
+  static Future<ApiResponse> createHome(Map<String, dynamic> body) => post('/home', body);
+  static Future<ApiResponse> updateHome(int id, Map<String, dynamic> body) => put('/home/$id', body);
+  static Future<ApiResponse> deleteHome(int id) => delete('/home/$id');
+
+  static Future<ApiResponse> getRoomList(int homeId) => get('/home/$homeId/room');
+  static Future<ApiResponse> createRoom(int homeId, Map<String, dynamic> body) => post('/home/$homeId/room', body);
+  static Future<ApiResponse> updateRoom(int homeId, int roomId, Map<String, dynamic> body) => put('/home/$homeId/room/$roomId', body);
+  static Future<ApiResponse> deleteRoom(int homeId, int roomId) => delete('/home/$homeId/room/$roomId');
+
+  static Future<ApiResponse> getRoomDevices(int homeId, int roomId) => get('/home/$homeId/room/$roomId/device');
+  static Future<ApiResponse> addDeviceToRoom(int homeId, int roomId, Map<String, dynamic> body) => post('/home/$homeId/room/$roomId/device', body);
+  static Future<ApiResponse> removeDeviceFromRoom(int homeId, int roomId, int deviceId) => delete('/home/$homeId/room/$roomId/device/$deviceId');
+
+  static Future<ApiResponse> getSceneList() => get('/scene');
+  static Future<ApiResponse> createScene(Map<String, dynamic> body) => post('/scene', body);
+  static Future<ApiResponse> updateScene(int id, Map<String, dynamic> body) => put('/scene/$id', body);
+  static Future<ApiResponse> deleteScene(int id) => delete('/scene/$id');
+  static Future<ApiResponse> runScene(int id) => post('/scene/$id/run', {});
+  static Future<ApiResponse> toggleScene(int id, bool enabled) => put('/scene/$id', {'enabled': enabled});
+
+  static Future<ApiResponse> getMessageList({int page = 1, int size = 50}) => get('/message', params: {'page': page, 'size': size});
+  static Future<ApiResponse> markMessageRead(int id) => post('/message/$id/read', {});
+  static Future<ApiResponse> markAllMessagesRead() => post('/message/read-all', {});
+  static Future<ApiResponse> deleteMessage(int id) => delete('/message/$id');
+
+  static Future<ApiResponse> getOTAFirmwareList() => get('/admin/ota');
+  static Future<ApiResponse> getOTAFirmwareDetail(int id) => get('/admin/ota/$id');
 }

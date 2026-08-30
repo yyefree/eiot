@@ -120,3 +120,98 @@ type Dashboard struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+// ========== 家庭/房间/场景/消息/OTA（云智能App核心模型）==========
+
+// Home 家庭
+type Home struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:64" json:"name"`
+	Address   string    `gorm:"size:255" json:"address"`
+	Icon      string    `gorm:"size:255" json:"icon"`
+	OwnerID   uint      `gorm:"index" json:"owner_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// HomeMember 家庭成员
+type HomeMember struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	HomeID   uint   `gorm:"index" json:"home_id"`
+	UserID   uint   `gorm:"index" json:"user_id"`
+	Role     string `gorm:"size:16;default:member" json:"role"` // owner / admin / member
+	Nickname string `gorm:"size:64" json:"nickname"`
+}
+
+// Room 房间
+type Room struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	HomeID    uint      `gorm:"index" json:"home_id"`
+	Name      string    `gorm:"size:64" json:"name"`
+	Icon      string    `gorm:"size:255" json:"icon"`
+	SortOrder int       `gorm:"default:0" json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// RoomDevice 房间-设备关联
+type RoomDevice struct {
+	RoomID   uint `gorm:"primaryKey" json:"room_id"`
+	DeviceID uint `gorm:"primaryKey" json:"device_id"`
+}
+
+// Scene 场景
+type Scene struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	HomeID    uint      `gorm:"index" json:"home_id"`
+	Name      string    `gorm:"size:64" json:"name"`
+	Icon      string    `gorm:"size:255" json:"icon"`
+	Type      string    `gorm:"size:16;default:manual" json:"type"` // manual / auto
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	SortOrder int       `gorm:"default:0" json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SceneCondition 场景触发条件
+type SceneCondition struct {
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	SceneID    uint   `gorm:"index" json:"scene_id"`
+	Type       string `gorm:"size:32" json:"type"` // time / device / location
+	ConfigJSON string `gorm:"type:text" json:"config_json"`
+}
+
+// SceneAction 场景执行动作
+type SceneAction struct {
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	SceneID    uint   `gorm:"index" json:"scene_id"`
+	DeviceID   uint   `json:"device_id"`
+	ActionJSON string `gorm:"type:text" json:"action_json"`
+	SortOrder  int    `gorm:"default:0" json:"sort_order"`
+}
+
+// Message 消息通知
+type Message struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    uint      `gorm:"index" json:"user_id"`
+	Type      string    `gorm:"size:32" json:"type"` // system / device / scene
+	Title     string    `gorm:"size:128" json:"title"`
+	Content   string    `gorm:"type:text" json:"content"`
+	Read      bool      `gorm:"default:false" json:"read"`
+	ExtraJSON string    `gorm:"type:text" json:"extra_json"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// OTAFirmware OTA固件包
+type OTAFirmware struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	ProductID  uint      `gorm:"index" json:"product_id"`
+	Version    string    `gorm:"size:32" json:"version"`
+	Changelog  string    `gorm:"type:text" json:"changelog"`
+	FileURL    string    `gorm:"size:512" json:"file_url"`
+	Size       int64     `json:"size"`
+	Status     string    `gorm:"size:16;default:pending" json:"status"` // pending / pushing / done
+	CreatedBy  uint      `json:"created_by"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}

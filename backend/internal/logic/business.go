@@ -4,6 +4,7 @@ import (
 	"eiot/internal/dao"
 	"eiot/internal/model"
 	"eiot/pkg/cache"
+	"eiot/pkg/mqtt"
 	"eiot/pkg/util"
 	"crypto/subtle"
 	"encoding/json"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // codeStore 保存验证码（内存存储，简化解法）
@@ -174,9 +177,7 @@ func SeedDemoData(adminPhone, adminPassword string) {
 	// 物模型合一（产品
 	var prodCount int64
 	dao.DB.Model(&model.Product{}).Count(&prodCount)
-	if prodCount > 0 {
-		return
-	}
+	if prodCount == 0 {
 
 	// 预定义物模型属性 JSON
 	propsTemp := `[{"identifier":"temp_01","name":"温度","accessMode":"r","dataType":{"type":"float","specs":{"min":-40,"max":85,"step":0.1,"unit":"℃"}}},{"identifier":"hum_01","name":"湿度","accessMode":"r","dataType":{"type":"float","specs":{"min":0,"max":100,"step":1,"unit":"%"}}}]`
@@ -250,6 +251,61 @@ func SeedDemoData(adminPhone, adminPassword string) {
 			LayoutJSON: `{"widgets":[{"type":"stat","title":"设备总数"},{"type":"chart","title":"近24小时能耗"}]}`,
 			IsDefault:  1,
 		})
+	}
+	} // end if prodCount == 0
+
+	// ========== 默认家庭/房间/场景（云智能App）==========
+	// （无论产品是否已存在，都检查家庭数据）
+	var homeCount int64
+	dao.DB.Model(&model.Home{}).Count(&homeCount)
+	if homeCount == 0 {
+		home := model.Home{Name: "我的家", Address: "示例地址", Icon: "home", OwnerID: admin.ID}
+		dao.DB.Create(&home)
+		dao.DB.Create(&model.HomeMember{HomeID: home.ID, UserID: admin.ID, Role: "owner", Nickname: admin.Nickname})
+
+		// 房间
+		rooms := []model.Room{
+			{HomeID: home.ID, Name: "客厅", Icon: "living_room", SortOrder: 0},
+			{HomeID: home.ID, Name: "卧室", Icon: "bedroom_parent", SortOrder: 1},
+			{HomeID: home.ID, Name: "厨房", Icon: "kitchen", SortOrder: 2},
+			{HomeID: home.ID, Name: "书房", Icon: "desk", SortOrder: 3},
+		}
+		for _, r := range rooms {
+			dao.DB.Create(&r)
+		}
+
+		// 把前几个设备分配到房间
+		var devices []model.Device
+		dao.DB.Limit(8).Find(&devices)
+		var roomList []model.Room
+		dao.DB.Where("home_id = ?", home.ID).Order("sort_order asc").Find(&roomList)
+		if len(roomList) > 0 && len(devices) > 0 {
+			for i, d := range devices {
+				rid := roomList[i%len(roomList)].ID
+				dao.DB.Create(&model.RoomDevice{RoomID: rid, DeviceID: d.ID})
+			}
+		}
+
+		// 场景
+		scene1 := model.Scene{HomeID: home.ID, Name: "回家模式", Icon: "home", Type: "manual", Enabled: true, SortOrder: 0}
+		dao.DB.Create(&scene1)
+		scene2 := model.Scene{HomeID: home.ID, Name: "离家模式", Icon: "logout", Type: "manual", Enabled: true, SortOrder: 1}
+		dao.DB.Create(&scene2)
+		scene3 := model.Scene{HomeID: home.ID, Name: "睡眠模式", Icon: "bedtime", Type: "manual", Enabled: true, SortOrder: 2}
+		dao.DB.Create(&scene3)
+
+		// 给场景添加示例动作（如果有设备的话）
+		if len(devices) > 0 {
+			dao.DB.Create(&model.SceneAction{SceneID: scene1.ID, DeviceID: devices[0].ID, ActionJSON: `{"switch_01":true}`, SortOrder: 0})
+			dao.DB.Create(&model.SceneAction{SceneID: scene2.ID, DeviceID: devices[0].ID, ActionJSON: `{"switch_01":false}`, SortOrder: 0})
+			if len(devices) > 1 {
+				dao.DB.Create(&model.SceneAction{SceneID: scene3.ID, DeviceID: devices[1].ID, ActionJSON: `{"switch_01":false}`, SortOrder: 0})
+			}
+		}
+
+		// 示例消息
+		dao.DB.Create(&model.Message{UserID: admin.ID, Type: "system", Title: "欢迎使用飞燕IoT平台", Content: "您的账户已成功创建，开始探索智能物联世界吧！"})
+		dao.DB.Create(&model.Message{UserID: admin.ID, Type: "device", Title: "设备上线通知", Content: "温湿度传感器-001 已上线"})
 	}
 }
 
@@ -724,4 +780,514 @@ func ListDashboards(uid uint, typ string) ([]model.Dashboard, error) {
 	}
 	err := q.Order("id desc").Find(&list).Error
 	return list, err
+}
+
+// ========== 家庭 ==========
+
+// CreateHome 创建家庭
+func CreateHome(name, address, icon string, ownerID uint) (*model.Home, error) {
+	if name == "" {
+		return nil, errors.New("家庭名称不可为空")
+	}
+	h := &model.Home{
+		Name: name, Address: address, Icon: icon, OwnerID: ownerID,
+	}
+	if err := dao.DB.Create(h).Error; err != nil {
+		return nil, err
+	}
+	// 自动把创建者添加为家庭 owner
+	dao.DB.Create(&model.HomeMember{HomeID: h.ID, UserID: ownerID, Role: "owner", Nickname: ""})
+	return h, nil
+}
+
+// ListHomes 家庭列表
+func ListHomes(uid uint) ([]model.Home, error) {
+	var list []model.Home
+	err := dao.DB.Where("owner_id = ?", uid).Order("id desc").Find(&list).Error
+	return list, err
+}
+
+// UpdateHome 更新家庭
+func UpdateHome(id uint, name, address, icon string) error {
+	if name == "" {
+		return errors.New("家庭名称不可为空")
+	}
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	updates["name"] = name
+	if address != "" {
+		updates["address"] = address
+	}
+	if icon != "" {
+		updates["icon"] = icon
+	}
+	return dao.DB.Model(&model.Home{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// DeleteHome 删除家庭
+func DeleteHome(id uint) error {
+	// 删除关联房间设备
+	var rooms []model.Room
+	dao.DB.Where("home_id = ?", id).Find(&rooms)
+	roomIDs := make([]uint, 0)
+	for _, r := range rooms {
+		roomIDs = append(roomIDs, r.ID)
+	}
+	if len(roomIDs) > 0 {
+		dao.DB.Where("room_id IN ?", roomIDs).Delete(&model.RoomDevice{})
+	}
+	dao.DB.Where("home_id = ?", id).Delete(&model.Room{})
+	dao.DB.Where("home_id = ?", id).Delete(&model.Scene{})
+	dao.DB.Where("home_id = ?", id).Delete(&model.HomeMember{})
+	return dao.DB.Delete(&model.Home{}, id).Error
+}
+
+// GetHomeDetail 获取家庭详情（含成员和房间数）
+func GetHomeDetail(id uint) (*model.Home, []model.HomeMember, int64, error) {
+	var h model.Home
+	if err := dao.DB.First(&h, id).Error; err != nil {
+		return nil, nil, 0, errors.New("家庭不存在")
+	}
+	var members []model.HomeMember
+	dao.DB.Where("home_id = ?", id).Find(&members)
+	var roomCount int64
+	dao.DB.Model(&model.Room{}).Where("home_id = ?", id).Count(&roomCount)
+	return &h, members, roomCount, nil
+}
+
+// ========== 家庭成员 ==========
+
+// AddHomeMember 添加家庭成员
+func AddHomeMember(homeID, userID uint, role, nickname string) (*model.HomeMember, error) {
+	// 检查家庭是否存在
+	var h model.Home
+	if err := dao.DB.First(&h, homeID).Error; err != nil {
+		return nil, errors.New("家庭不存在")
+	}
+	// 检查是否已是成员
+	var count int64
+	dao.DB.Model(&model.HomeMember{}).Where("home_id = ? AND user_id = ?", homeID, userID).Count(&count)
+	if count > 0 {
+		return nil, errors.New("用户已是该家庭成员")
+	}
+	if role == "" {
+		role = "member"
+	}
+	m := &model.HomeMember{HomeID: homeID, UserID: userID, Role: role, Nickname: nickname}
+	if err := dao.DB.Create(m).Error; err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// RemoveHomeMember 移除家庭成员
+func RemoveHomeMember(homeID, userID uint) error {
+	result := dao.DB.Where("home_id = ? AND user_id = ?", homeID, userID).Delete(&model.HomeMember{})
+	if result.RowsAffected == 0 {
+		return errors.New("成员不存在")
+	}
+	return result.Error
+}
+
+// ListHomeMembers 家庭成员列表
+func ListHomeMembers(homeID uint) ([]model.HomeMember, error) {
+	var list []model.HomeMember
+	err := dao.DB.Where("home_id = ?", homeID).Find(&list).Error
+	return list, err
+}
+
+// ========== 房间 ==========
+
+// CreateRoom 创建房间
+func CreateRoom(homeID uint, name, icon string, sortOrder int) (*model.Room, error) {
+	if name == "" {
+		return nil, errors.New("房间名称不可为空")
+	}
+	// 检查家庭是否存在
+	var h model.Home
+	if err := dao.DB.First(&h, homeID).Error; err != nil {
+		return nil, errors.New("家庭不存在")
+	}
+	r := &model.Room{
+		HomeID: homeID, Name: name, Icon: icon, SortOrder: sortOrder,
+	}
+	if err := dao.DB.Create(r).Error; err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// ListRooms 房间列表
+func ListRooms(homeID uint) ([]model.Room, error) {
+	var list []model.Room
+	err := dao.DB.Where("home_id = ?", homeID).Order("sort_order asc, id asc").Find(&list).Error
+	return list, err
+}
+
+// UpdateRoom 更新房间
+func UpdateRoom(id uint, name, icon string) error {
+	if name == "" {
+		return errors.New("房间名称不可为空")
+	}
+	updates := map[string]interface{}{"updated_at": time.Now(), "name": name}
+	if icon != "" {
+		updates["icon"] = icon
+	}
+	return dao.DB.Model(&model.Room{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// DeleteRoom 删除房间
+func DeleteRoom(id uint) error {
+	dao.DB.Where("room_id = ?", id).Delete(&model.RoomDevice{})
+	return dao.DB.Delete(&model.Room{}, id).Error
+}
+
+// ReorderRooms 房间排序
+func ReorderRooms(homeID uint, roomIDs []uint) error {
+	for i, rid := range roomIDs {
+		dao.DB.Model(&model.Room{}).Where("id = ? AND home_id = ?", rid, homeID).Update("sort_order", i)
+	}
+	return nil
+}
+
+// ========== 房间设备 ==========
+
+// AddDeviceToRoom 添加设备到房间
+func AddDeviceToRoom(roomID, deviceID uint) error {
+	// 检查房间是否存在
+	var r model.Room
+	if err := dao.DB.First(&r, roomID).Error; err != nil {
+		return errors.New("房间不存在")
+	}
+	// 检查设备是否存在
+	var d model.Device
+	if err := dao.DB.First(&d, deviceID).Error; err != nil {
+		return errors.New("设备不存在")
+	}
+	// 检查是否已存在
+	var count int64
+	dao.DB.Model(&model.RoomDevice{}).Where("room_id = ? AND device_id = ?", roomID, deviceID).Count(&count)
+	if count > 0 {
+		return errors.New("设备已在该房间中")
+	}
+	return dao.DB.Create(&model.RoomDevice{RoomID: roomID, DeviceID: deviceID}).Error
+}
+
+// RemoveDeviceFromRoom 从房间移除设备
+func RemoveDeviceFromRoom(roomID, deviceID uint) error {
+	result := dao.DB.Where("room_id = ? AND device_id = ?", roomID, deviceID).Delete(&model.RoomDevice{})
+	if result.RowsAffected == 0 {
+		return errors.New("设备不在该房间中")
+	}
+	return result.Error
+}
+
+// ListRoomDevices 房间设备列表
+func ListRoomDevices(roomID uint) ([]model.Device, error) {
+	var deviceIDs []uint
+	dao.DB.Model(&model.RoomDevice{}).Where("room_id = ?", roomID).Pluck("device_id", &deviceIDs)
+	var list []model.Device
+	if len(deviceIDs) == 0 {
+		return list, nil
+	}
+	err := dao.DB.Where("id IN ?", deviceIDs).Find(&list).Error
+	return list, err
+}
+
+// MoveDeviceToRoom 移动设备到另一个房间
+func MoveDeviceToRoom(fromRoomID, toRoomID, deviceID uint) error {
+	// 先从原房间移除
+	dao.DB.Where("room_id = ? AND device_id = ?", fromRoomID, deviceID).Delete(&model.RoomDevice{})
+	// 添加到新房间
+	return AddDeviceToRoom(toRoomID, deviceID)
+}
+
+// ========== 场景 ==========
+
+// CreateScene 创建场景
+func CreateScene(homeID uint, name, icon, sceneType string, sortOrder int) (*model.Scene, error) {
+	if name == "" {
+		return nil, errors.New("场景名称不可为空")
+	}
+	if sceneType == "" {
+		sceneType = "manual"
+	}
+	s := &model.Scene{
+		HomeID: homeID, Name: name, Icon: icon, Type: sceneType,
+		Enabled: true, SortOrder: sortOrder,
+	}
+	if err := dao.DB.Create(s).Error; err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// ListScenes 场景列表
+func ListScenes(homeID uint) ([]model.Scene, error) {
+	var list []model.Scene
+	err := dao.DB.Where("home_id = ?", homeID).Order("sort_order asc, id asc").Find(&list).Error
+	return list, err
+}
+
+// UpdateScene 更新场景
+func UpdateScene(id uint, name, icon, sceneType string) error {
+	if name == "" {
+		return errors.New("场景名称不可为空")
+	}
+	updates := map[string]interface{}{"updated_at": time.Now(), "name": name}
+	if icon != "" {
+		updates["icon"] = icon
+	}
+	if sceneType != "" {
+		updates["type"] = sceneType
+	}
+	return dao.DB.Model(&model.Scene{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// DeleteScene 删除场景
+func DeleteScene(id uint) error {
+	dao.DB.Where("scene_id = ?", id).Delete(&model.SceneCondition{})
+	dao.DB.Where("scene_id = ?", id).Delete(&model.SceneAction{})
+	return dao.DB.Delete(&model.Scene{}, id).Error
+}
+
+// ToggleScene 启用/禁用场景
+func ToggleScene(id uint, enabled bool) error {
+	return dao.DB.Model(&model.Scene{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"enabled":    enabled,
+		"updated_at": time.Now(),
+	}).Error
+}
+
+// ========== 场景条件/动作 ==========
+
+// AddSceneCondition 添加场景条件
+func AddSceneCondition(sceneID uint, condType, configJSON string) (*model.SceneCondition, error) {
+	var s model.Scene
+	if err := dao.DB.First(&s, sceneID).Error; err != nil {
+		return nil, errors.New("场景不存在")
+	}
+	c := &model.SceneCondition{
+		SceneID: sceneID, Type: condType, ConfigJSON: configJSON,
+	}
+	if err := dao.DB.Create(c).Error; err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// RemoveSceneCondition 移除场景条件
+func RemoveSceneCondition(id uint) error {
+	result := dao.DB.Delete(&model.SceneCondition{}, id)
+	if result.RowsAffected == 0 {
+		return errors.New("条件不存在")
+	}
+	return result.Error
+}
+
+// AddSceneAction 添加场景动作
+func AddSceneAction(sceneID, deviceID uint, actionJSON string, sortOrder int) (*model.SceneAction, error) {
+	var s model.Scene
+	if err := dao.DB.First(&s, sceneID).Error; err != nil {
+		return nil, errors.New("场景不存在")
+	}
+	a := &model.SceneAction{
+		SceneID: sceneID, DeviceID: deviceID, ActionJSON: actionJSON, SortOrder: sortOrder,
+	}
+	if err := dao.DB.Create(a).Error; err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// RemoveSceneAction 移除场景动作
+func RemoveSceneAction(id uint) error {
+	result := dao.DB.Delete(&model.SceneAction{}, id)
+	if result.RowsAffected == 0 {
+		return errors.New("动作不存在")
+	}
+	return result.Error
+}
+
+// ReorderSceneActions 场景动作排序
+func ReorderSceneActions(sceneID uint, actionIDs []uint) error {
+	for i, aid := range actionIDs {
+		dao.DB.Model(&model.SceneAction{}).Where("id = ? AND scene_id = ?", aid, sceneID).Update("sort_order", i)
+	}
+	return nil
+}
+
+// ========== 执行场景 ==========
+
+// RunScene 手动执行场景 —— 遍历动作并通过 MQTT 下发设备控制指令
+func RunScene(sceneID uint, emqx *mqtt.EMQXClient) error {
+	var s model.Scene
+	if err := dao.DB.First(&s, sceneID).Error; err != nil {
+		return errors.New("场景不存在")
+	}
+	if !s.Enabled {
+		return errors.New("场景已禁用")
+	}
+	var actions []model.SceneAction
+	if err := dao.DB.Where("scene_id = ?", sceneID).Order("sort_order asc").Find(&actions).Error; err != nil {
+		return err
+	}
+	if len(actions) == 0 {
+		return errors.New("场景无动作")
+	}
+	for _, a := range actions {
+		var d model.Device
+		if err := dao.DB.First(&d, a.DeviceID).Error; err != nil {
+			continue // 设备不存在则跳过
+		}
+		var params map[string]interface{}
+		if err := json.Unmarshal([]byte(a.ActionJSON), &params); err != nil {
+			continue // JSON 解析失败则跳过
+		}
+		if emqx != nil {
+			_ = emqx.Publish(fmt.Sprintf("/sys/cmd/%s", d.DeviceSN), map[string]interface{}{
+				"product_key": d.ProductKey,
+				"params":      params,
+				"ts":          time.Now().Unix(),
+			})
+		}
+	}
+	// 记录操作日志
+	dao.DB.Create(&model.OperationLog{
+		Action: "run_scene", Target: fmt.Sprintf("scene:%d", sceneID),
+		Detail: fmt.Sprintf("执行场景 %s，共 %d 个动作", s.Name, len(actions)), CreatedAt: time.Now(),
+	})
+	return nil
+}
+
+// ========== 消息 ==========
+
+// CreateMessage 创建消息
+func CreateMessage(userID uint, msgType, title, content, extraJSON string) (*model.Message, error) {
+	m := &model.Message{
+		UserID: userID, Type: msgType, Title: title, Content: content, ExtraJSON: extraJSON,
+	}
+	if err := dao.DB.Create(m).Error; err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// ListMessages 消息列表
+func ListMessages(userID uint, page, size int) (int64, []model.Message, error) {
+	var total int64
+	var list []model.Message
+	dao.DB.Model(&model.Message{}).Where("user_id = ?", userID).Count(&total)
+	err := dao.DB.Where("user_id = ?", userID).Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// MarkMessageRead 标记单条消息已读
+func MarkMessageRead(id, userID uint) error {
+	return dao.DB.Model(&model.Message{}).Where("id = ? AND user_id = ?", id, userID).Update("read", true).Error
+}
+
+// MarkAllRead 标记全部消息已读
+func MarkAllRead(userID uint) error {
+	return dao.DB.Model(&model.Message{}).Where("user_id = ? AND `read` = ?", userID, false).Update("read", true).Error
+}
+
+// UnreadCount 未读消息数
+func UnreadCount(userID uint) (int64, error) {
+	var count int64
+	err := dao.DB.Model(&model.Message{}).Where("user_id = ? AND `read` = ?", userID, false).Count(&count).Error
+	return count, err
+}
+
+// DeleteMessage 删除消息
+func DeleteMessage(id, userID uint) error {
+	result := dao.DB.Where("id = ? AND user_id = ?", id, userID).Delete(&model.Message{})
+	if result.RowsAffected == 0 {
+		return errors.New("消息不存在")
+	}
+	return result.Error
+}
+
+// ========== OTA ==========
+
+// CreateFirmware 创建固件包
+func CreateFirmware(productID uint, version, changelog, fileURL string, size int64, createdBy uint) (*model.OTAFirmware, error) {
+	if version == "" {
+		return nil, errors.New("固件版本不可为空")
+	}
+	// 检查版本是否已存在
+	var count int64
+	dao.DB.Model(&model.OTAFirmware{}).Where("product_id = ? AND version = ?", productID, version).Count(&count)
+	if count > 0 {
+		return nil, errors.New("该版本固件已存在")
+	}
+	f := &model.OTAFirmware{
+		ProductID: productID, Version: version, Changelog: changelog,
+		FileURL: fileURL, Size: size, Status: "pending", CreatedBy: createdBy,
+	}
+	if err := dao.DB.Create(f).Error; err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// ListFirmwares 固件列表
+func ListFirmwares(productID uint, page, size int) (int64, []model.OTAFirmware, error) {
+	var total int64
+	var list []model.OTAFirmware
+	q := dao.DB.Model(&model.OTAFirmware{})
+	if productID > 0 {
+		q = q.Where("product_id = ?", productID)
+	}
+	q.Count(&total)
+	err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// PushOTA 推送OTA升级（更新设备固件版本并下发升级指令）
+func PushOTA(firmwareID uint, emqx *mqtt.EMQXClient) error {
+	var f model.OTAFirmware
+	if err := dao.DB.First(&f, firmwareID).Error; err != nil {
+		return errors.New("固件包不存在")
+	}
+	if f.Status == "done" {
+		return errors.New("该固件已推送完成")
+	}
+	// 更新状态为推送中
+	dao.DB.Model(&f).Update("status", "pushing")
+
+	// 查找该产品下所有设备
+	var devices []model.Device
+	dao.DB.Where("product_id = ?", f.ProductID).Find(&devices)
+
+	if len(devices) == 0 {
+		dao.DB.Model(&f).Update("status", "done")
+		return errors.New("该产品下无设备")
+	}
+
+	// 通过 MQTT 下发升级指令
+	for _, d := range devices {
+		if emqx != nil {
+			_ = emqx.Publish(fmt.Sprintf("/ota/upgrade/%s", d.DeviceSN), map[string]interface{}{
+				"product_key": d.ProductKey,
+				"device_sn":   d.DeviceSN,
+				"version":     f.Version,
+				"file_url":    f.FileURL,
+				"ts":          time.Now().Unix(),
+			})
+		}
+	}
+
+	// 记录日志
+	dao.DB.Create(&model.OperationLog{
+		Action: "push_ota", Target: fmt.Sprintf("firmware:%d", firmwareID),
+		Detail: fmt.Sprintf("推送OTA固件 %s，共 %d 台设备", f.Version, len(devices)), CreatedAt: time.Now(),
+	})
+
+	dao.DB.Model(&f).Update("status", "done")
+	return nil
+}
+
+// Ensure 利用 gorm.ErrRecordNotFound 的辅助判断（如需更精确的 not-found 语义）
+func ensureRecordNotFound(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound)
 }

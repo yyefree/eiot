@@ -60,12 +60,15 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> sendCode(String phone) async {
+  Future<String?> sendCode(String phone) async {
     try {
       final resp = await ApiClient.post('/auth/send-code', {'phone': phone});
-      return resp.ok;
+      if (resp.ok && resp.data is Map<String, dynamic>) {
+        return (resp.data as Map<String, dynamic>)['code']?.toString();
+      }
+      return null;
     } catch (_) {
-      return false;
+      return null;
     }
   }
 

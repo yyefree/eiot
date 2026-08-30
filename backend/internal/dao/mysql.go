@@ -33,17 +33,26 @@ func InitMySQL(cfg config.MySQLConf) error {
 		sqlDB.SetMaxOpenConns(100)
 		sqlDB.SetConnMaxLifetime(time.Hour)
 	}
-	// 自动迁移（飞燕兼容模型
+	// 自动迁移（飞燕兼容模型 + 云智能App模型）
 	err = DB.AutoMigrate(
-    &model.Project{},
-    &model.User{},
-    &model.Product{},
-    &model.Device{},
-    &model.DeviceShare{},
-    &model.UserDeviceUI{},
-    &model.OperationLog{},
-    &model.Dashboard{},
-  )
+		&model.Project{},
+		&model.User{},
+		&model.Product{},
+		&model.Device{},
+		&model.DeviceShare{},
+		&model.UserDeviceUI{},
+		&model.OperationLog{},
+		&model.Dashboard{},
+		&model.Home{},
+		&model.HomeMember{},
+		&model.Room{},
+		&model.RoomDevice{},
+		&model.Scene{},
+		&model.SceneCondition{},
+		&model.SceneAction{},
+		&model.Message{},
+		&model.OTAFirmware{},
+	)
 	if err != nil {
 		log.Printf("[MySQL] migrate warning: %v", err)
 	}
