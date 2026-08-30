@@ -119,6 +119,7 @@ type userItem struct {
 	Username  string `json:"username"`
 	Phone     string `json:"phone"`
 	Nickname  string `json:"nickname"`
+	Email     string `json:"email"`
 	Role      string `json:"role"`
 	Status    int    `json:"status"`
 	CreatedAt string `json:"createdAt"`
@@ -127,7 +128,7 @@ type userItem struct {
 func toUserItem(u *model.User) userItem {
 	return userItem{
 		ID: u.ID, Username: u.Username, Phone: u.Phone,
-		Nickname: u.Nickname, Role: u.Role, Status: u.Status,
+		Nickname: u.Nickname, Email: u.Email, Role: u.Role, Status: u.Status,
 		CreatedAt: u.CreatedAt.Format("2006-01-02 15:04:05"),
 	}
 }
@@ -143,12 +144,13 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 		api.POST("/auth/login-code", wrap(sc, handleLoginCode))
 		api.GET("/user/info", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUserInfo))
 		api.PUT("/user/info", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUpdateUserInfo))
+		api.PUT("/user/password", middleware.AuthMiddleware(sc.Config), wrap(sc, handleChangePassword))
 
-	// 健康检查
-	api.GET("/health", wrap(sc, handleHealthCheck))
+		// 健康检查
+		api.GET("/health", wrap(sc, handleHealthCheck))
 
-	// WebSocket 实时推送
-	r.GET("/ws", HandleWebSocket)
+		// WebSocket 实时推送（需要认证）
+		r.GET("/ws", middleware.AuthMiddleware(sc.Config), HandleWebSocket)
 
 		// 设备历史数据（用户）
 		api.GET("/device/data/:sn", middleware.AuthMiddleware(sc.Config), wrap(sc, handleDeviceDataHistory))
@@ -192,6 +194,12 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 
 			// 用户
 			admin.GET("/user", wrap(sc, handleListUser))
+			admin.PUT("/user/:id/status", wrap(sc, handleAdminToggleUserStatus))
+			admin.DELETE("/user/:id", wrap(sc, handleAdminDeleteUser))
+			admin.PUT("/user/:id/password", wrap(sc, handleAdminResetPassword))
+
+			// 操作日志
+			admin.GET("/operation-log", wrap(sc, handleListOperationLogs))
 
 			// 看板统计
 			admin.GET("/stats", wrap(sc, handleAdminStats))
@@ -279,6 +287,7 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 		// OTA 管理（Admin）
 		admin.POST("/ota", wrap(sc, handleCreateFirmware))
 		admin.GET("/ota", wrap(sc, handleListFirmwares))
+		admin.DELETE("/ota/:id", wrap(sc, handleDeleteFirmware))
 		admin.POST("/ota/:id/push", wrap(sc, handlePushOTA))
 	}
 }
@@ -336,6 +345,26 @@ func sVal(v interface{}) string {
 	return ""
 }
 
+func uVal(v interface{}, def uint) uint {
+	if v == nil {
+		return def
+	}
+	if f, ok := v.(float64); ok {
+		return uint(f)
+	}
+	return def
+}
+
+func iVal(v interface{}, def int) int {
+	if v == nil {
+		return def
+	}
+	if f, ok := v.(float64); ok {
+		return int(f)
+	}
+	return def
+}
+
 func pageSize(c *gin.Context) (int, int) {
 	p, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	sz, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
@@ -370,10 +399,12 @@ func handleSendCode(c *gin.Context, sc *svc.ServiceContext) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	code, err := logic.SendCode(sVal(b["phone"]))
+	_, err = logic.SendCode(sVal(b["phone"]))
 	if err != nil {
 		return nil, err
 	}
+	// 开发环境返回验证码（生产环境应通过 SMS 发送，不返回给前端）
+	code := logic.GetLastCode(sVal(b["phone"]))
 	return gin.H{"expire_sec": 600, "code": code}, nil
 }
 
@@ -761,18 +792,18 @@ func handleShareDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, err
 	if err != nil {
 		return nil, err
 	}
-	devID, _ := b["device_id"].(float64)
-	shareUID, _ := b["share_user_id"].(float64)
+	devID := uVal(b["device_id"], 0)
+	shareUID := uVal(b["share_user_id"], 0)
 	perm := sVal(b["permission"])
 	if perm == "" {
 		perm = "read"
 	}
-	hours, _ := b["hours"].(float64)
+	hours := iVal(b["hours"], 0)
 	var exp time.Time
 	if hours > 0 {
 		exp = time.Now().Add(time.Duration(hours) * time.Hour)
 	}
-	err = logic.ShareDevice(middleware.UID(c), uint(devID), uint(shareUID), perm, exp)
+	err = logic.ShareDevice(middleware.UID(c), devID, shareUID, perm, exp)
 	if err != nil {
 		return nil, err
 	}
@@ -994,12 +1025,12 @@ func handleDeleteHome(c *gin.Context, sc *svc.ServiceContext) (interface{}, erro
 }
 
 func handleAddHomeMember(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
 	b, err := bodyMap(c)
 	if err != nil {
 		return nil, err
 	}
-	id, _ := strconv.Atoi(c.Param("id"))
-	uid := uint(b["user_id"].(float64))
+	uid := uVal(b["user_id"], 0)
 	m, e := logic.AddHomeMember(uint(id), uid, sVal(b["role"]), sVal(b["nickname"]))
 	return m, e
 }
@@ -1022,11 +1053,8 @@ func handleCreateRoom(c *gin.Context, sc *svc.ServiceContext) (interface{}, erro
 	if err != nil {
 		return nil, err
 	}
-	homeID := uint(b["home_id"].(float64))
-	sortOrder := 0
-	if v, ok := b["sort_order"].(float64); ok {
-		sortOrder = int(v)
-	}
+	homeID := uVal(b["home_id"], 0)
+	sortOrder := iVal(b["sort_order"], 0)
 	return logic.CreateRoom(homeID, sVal(b["name"]), sVal(b["icon"]), sortOrder)
 }
 
@@ -1054,12 +1082,12 @@ func handleReorderRooms(c *gin.Context, sc *svc.ServiceContext) (interface{}, er
 	if err != nil {
 		return nil, err
 	}
-	homeID := uint(b["home_id"].(float64))
+	homeID := uVal(b["home_id"], 0)
 	items, _ := b["items"].([]interface{})
 	var ids []uint
 	for _, item := range items {
 		if m, ok := item.(map[string]interface{}); ok {
-			ids = append(ids, uint(m["id"].(float64)))
+			ids = append(ids, uVal(m["id"], 0))
 		}
 	}
 	return nil, logic.ReorderRooms(homeID, ids)
@@ -1071,7 +1099,7 @@ func handleAddDeviceToRoom(c *gin.Context, sc *svc.ServiceContext) (interface{},
 		return nil, err
 	}
 	id, _ := strconv.Atoi(c.Param("id"))
-	deviceID := uint(b["device_id"].(float64))
+	deviceID := uVal(b["device_id"], 0)
 	return nil, logic.AddDeviceToRoom(uint(id), deviceID)
 }
 
@@ -1093,11 +1121,8 @@ func handleCreateScene(c *gin.Context, sc *svc.ServiceContext) (interface{}, err
 	if err != nil {
 		return nil, err
 	}
-	homeID := uint(b["home_id"].(float64))
-	sortOrder := 0
-	if v, ok := b["sort_order"].(float64); ok {
-		sortOrder = int(v)
-	}
+	homeID := uVal(b["home_id"], 0)
+	sortOrder := iVal(b["sort_order"], 0)
 	return logic.CreateScene(homeID, sVal(b["name"]), sVal(b["icon"]), sVal(b["type"]), sortOrder)
 }
 
@@ -1156,11 +1181,8 @@ func handleAddSceneAction(c *gin.Context, sc *svc.ServiceContext) (interface{}, 
 		return nil, err
 	}
 	id, _ := strconv.Atoi(c.Param("id"))
-	deviceID := uint(b["device_id"].(float64))
-	sortOrder := 0
-	if v, ok := b["sort_order"].(float64); ok {
-		sortOrder = int(v)
-	}
+	deviceID := uVal(b["device_id"], 0)
+	sortOrder := iVal(b["sort_order"], 0)
 	m, e := logic.AddSceneAction(uint(id), deviceID, sVal(b["action_json"]), sortOrder)
 	return m, e
 }
@@ -1175,12 +1197,12 @@ func handleReorderSceneActions(c *gin.Context, sc *svc.ServiceContext) (interfac
 	if err != nil {
 		return nil, err
 	}
-	sceneID := uint(b["scene_id"].(float64))
+	sceneID := uVal(b["scene_id"], 0)
 	items, _ := b["items"].([]interface{})
 	var ids []uint
 	for _, item := range items {
 		if m, ok := item.(map[string]interface{}); ok {
-			ids = append(ids, uint(m["id"].(float64)))
+			ids = append(ids, uVal(m["id"], 0))
 		}
 	}
 	return nil, logic.ReorderSceneActions(sceneID, ids)
@@ -1244,6 +1266,22 @@ func handlePushOTA(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) 
 	return nil, logic.PushOTA(uint(id), sc.EMQX)
 }
 
+func handleDeleteFirmware(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteFirmware(uint(id))
+}
+
+// ========== 操作日志 ==========
+
+func handleListOperationLogs(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	page, size := pageSize(c)
+	total, list, err := logic.ListOperationLogs(page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list, "page": page, "size": size}, nil
+}
+
 // ========== 管理员设备管理 ==========
 
 func handleUpdateAdminDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
@@ -1297,6 +1335,55 @@ func handleUpdateUserInfo(c *gin.Context, sc *svc.ServiceContext) (interface{}, 
 		return nil, err
 	}
 	return nil, logic.UpdateUserInfo(middleware.UID(c), sVal(b["nickname"]), sVal(b["avatar"]), sVal(b["email"]))
+}
+
+func handleChangePassword(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	oldPwd := sVal(b["old_password"])
+	newPwd := sVal(b["new_password"])
+	if oldPwd == "" || newPwd == "" {
+		return nil, NewBizError(http.StatusBadRequest, 400, "旧密码和新密码不能为空")
+	}
+	if len(newPwd) < 6 {
+		return nil, NewBizError(http.StatusBadRequest, 400, "新密码长度不能少于6位")
+	}
+	return nil, logic.ChangePassword(middleware.UID(c), oldPwd, newPwd)
+}
+
+// ========== 管理员用户管理 ==========
+
+func handleAdminToggleUserStatus(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	status := 1
+	if v, ok := b["status"].(float64); ok {
+		status = int(v)
+	}
+	return nil, logic.AdminToggleUserStatus(uint(id), status)
+}
+
+func handleAdminDeleteUser(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.AdminDeleteUser(uint(id))
+}
+
+func handleAdminResetPassword(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	newPwd := sVal(b["password"])
+	if newPwd == "" {
+		newPwd = "123456"
+	}
+	return nil, logic.AdminResetPassword(uint(id), newPwd)
 }
 
 // ========== 健康检查 ==========

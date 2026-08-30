@@ -159,7 +159,14 @@ const drawerVisible = ref(false)
 const isMobile = ref(false)
 const userInfo = ref(null)
 const currentProject = ref('我的项目')
-const notifyCount = ref(3)
+const notifyCount = ref(0)
+
+const loadUnreadCount = async () => {
+  try {
+    const data = await request.get('/message/unread')
+    notifyCount.value = typeof data === 'number' ? data : (data?.count || 0)
+  } catch (e) { /* ignore */ }
+}
 
 const menuGroups = [
   {
@@ -242,6 +249,7 @@ const handleCommand = async (cmd) => {
 onMounted(() => {
   checkSize()
   loadUser()
+  loadUnreadCount()
   window.addEventListener('resize', checkSize)
 })
 

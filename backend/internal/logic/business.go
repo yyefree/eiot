@@ -85,6 +85,16 @@ func SendCode(phoneOrEmail string) (string, error) {
 	return code, nil
 }
 
+// GetLastCode 获取最近生成的验证码（仅开发环境使用）
+func GetLastCode(phoneOrEmail string) string {
+	codeMu.RLock()
+	defer codeMu.RUnlock()
+	if item, ok := codeMap[phoneOrEmail]; ok {
+		return item.Code
+	}
+	return ""
+}
+
 // LoginOrRegisterByCode 使用验证码登录或注册
 func LoginOrRegisterByCode(phone, code, secret string) (string, *model.User, error) {
 	codeMu.Lock()
@@ -810,10 +820,18 @@ func CreateHome(name, address, icon string, ownerID uint) (*model.Home, error) {
 	return h, nil
 }
 
-// ListHomes 家庭列表
+// ListHomes 家庭列表（包含用户作为成员的家庭）
 func ListHomes(uid uint) ([]model.Home, error) {
 	var list []model.Home
-	err := dao.DB.Where("owner_id = ?", uid).Order("id desc").Find(&list).Error
+	// 查找用户作为成员的家庭ID
+	var memberHomeIDs []uint
+	dao.DB.Model(&model.HomeMember{}).Where("user_id = ?", uid).Pluck("home_id", &memberHomeIDs)
+	// 合并用户拥有的和作为成员的
+	query := dao.DB.Where("owner_id = ?", uid)
+	if len(memberHomeIDs) > 0 {
+		query = query.Or("id IN ?", memberHomeIDs)
+	}
+	err := query.Order("id desc").Find(&list).Error
 	return list, err
 }
 
@@ -1302,6 +1320,24 @@ func ensureRecordNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
 
+// ========== 操作日志 ==========
+
+// ListOperationLogs 操作日志列表
+func ListOperationLogs(page, size int) (int64, []model.OperationLog, error) {
+	var total int64
+	var list []model.OperationLog
+	dao.DB.Model(&model.OperationLog{}).Count(&total)
+	err := dao.DB.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// ========== 固件删除 ==========
+
+// DeleteFirmware 删除固件包
+func DeleteFirmware(id uint) error {
+	return dao.DB.Delete(&model.OTAFirmware{}, id).Error
+}
+
 // ========== 设备历史数据 ==========
 
 // SaveDeviceData 保存设备上报数据到历史记录
@@ -1373,6 +1409,48 @@ func UpdateUserInfo(uid uint, nickname, avatar, email string) error {
 		updates["email"] = email
 	}
 	return dao.DB.Model(&model.User{}).Where("id = ?", uid).Updates(updates).Error
+}
+
+// ChangePassword 修改密码
+func ChangePassword(uid uint, oldPwd, newPwd string) error {
+	var u model.User
+	if err := dao.DB.First(&u, uid).Error; err != nil {
+		return errors.New("用户不存在")
+	}
+	if !util.CheckPassword(oldPwd, u.Password) {
+		return errors.New("旧密码错误")
+	}
+	hashed, err := util.HashPassword(newPwd)
+	if err != nil {
+		return err
+	}
+	return dao.DB.Model(&u).Update("password", hashed).Error
+}
+
+// AdminToggleUserStatus 管理员启用/禁用用户
+func AdminToggleUserStatus(uid uint, status int) error {
+	return dao.DB.Model(&model.User{}).Where("id = ?", uid).Update("status", status).Error
+}
+
+// AdminDeleteUser 管理员删除用户
+func AdminDeleteUser(uid uint) error {
+	var u model.User
+	if err := dao.DB.First(&u, uid).Error; err != nil {
+		return errors.New("用户不存在")
+	}
+	if u.Role == "admin" {
+		return errors.New("不可删除管理员账户")
+	}
+	return dao.DB.Delete(&u).Error
+}
+
+// AdminResetPassword 管理员重置用户密码
+func AdminResetPassword(uid uint, newPwd string) error {
+	hashed, err := util.HashPassword(newPwd)
+	if err != nil {
+		return err
+	}
+	return dao.DB.Model(&model.User{}).Where("id = ?", uid).Update("password", hashed).Error
 }
 
 // ========== 告警规则 ==========

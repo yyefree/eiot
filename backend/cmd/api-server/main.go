@@ -7,6 +7,7 @@ import (
 	"eiot/internal/svc"
 	"eiot/pkg/cache"
 	"eiot/pkg/config"
+	"eiot/pkg/middleware"
 	"eiot/pkg/mqtt"
 	"eiot/pkg/tsdb"
 	"context"
@@ -150,6 +151,9 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
+
+	// 速率限制：全局 100 req/min, 登录/发验证码 10 req/min
+	r.Use(middleware.RateLimitMiddleware(100, time.Minute))
 
 	// CORS
 	origins := sc.Config.CORSOrigins

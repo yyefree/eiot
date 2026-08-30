@@ -16,13 +16,15 @@ class HomeProvider extends ChangeNotifier {
   Future<void> loadHomes() async {
     _loading = true;
     notifyListeners();
-    final resp = await ApiClient.get('/home');
+    final resp = await ApiClient.getHomeList();
     if (resp.ok && resp.data != null) {
       final data = resp.data;
-      final list = (data is Map<String, dynamic> ? data['list'] : data) as List?;
-      _homes = list?.whereType<Map<String, dynamic>>().map((e) => Home.fromJson(e)).toList() ?? [];
+      // 后端直接返回数组，也可能包装在 list 中
+      final list = (data is List) ? data : (data is Map<String, dynamic> ? data['list'] : null);
+      _homes = (list as List?)?.whereType<Map<String, dynamic>>().map((e) => Home.fromJson(e)).toList() ?? [];
       if (_homes.isNotEmpty && _currentHome == null) {
         _currentHome = _homes.firstWhere((h) => h.isDefault, orElse: () => _homes.first);
+        await loadRooms();
       }
     }
     _loading = false;

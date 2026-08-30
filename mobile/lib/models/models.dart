@@ -353,19 +353,21 @@ class Message {
 class OTAFirmware {
   final int id;
   final String version;
-  final String deviceModel;
+  final int productId;
   final String changelog;
-  final int fileSize;
-  final String downloadUrl;
+  final int size;
+  final String fileUrl;
+  final String status;
   final String createdAt;
 
   OTAFirmware({
     required this.id,
     this.version = '',
-    this.deviceModel = '',
+    this.productId = 0,
     this.changelog = '',
-    this.fileSize = 0,
-    this.downloadUrl = '',
+    this.size = 0,
+    this.fileUrl = '',
+    this.status = '',
     this.createdAt = '',
   });
 
@@ -373,11 +375,12 @@ class OTAFirmware {
     return OTAFirmware(
       id: json['id'] as int? ?? 0,
       version: json['version'] as String? ?? '',
-      deviceModel: json['device_model'] as String? ?? '',
+      productId: json['product_id'] as int? ?? 0,
       changelog: json['changelog'] as String? ?? '',
-      fileSize: json['file_size'] as int? ?? 0,
-      downloadUrl: json['download_url'] as String? ?? '',
-      createdAt: json['createdAt'] as String? ?? '',
+      size: json['size'] as int? ?? 0,
+      fileUrl: json['file_url'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      createdAt: json['created_at'] as String? ?? '',
     );
   }
 }

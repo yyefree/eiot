@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../api/api_client.dart';
 import 'home_manager_page.dart';
 
 class ProfilePage extends StatelessWidget {
@@ -62,17 +63,29 @@ class ProfilePage extends StatelessWidget {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const HomeManagerPage()));
             }),
             _divider(),
-            _menuItem(Icons.share, '设备共享', () {}),
+            _menuItem(Icons.share, '设备共享', () {
+              _showShareDialog(context);
+            }),
             _divider(),
-            _menuItem(Icons.system_update, '固件升级', () {}),
+            _menuItem(Icons.system_update, '固件升级', () {
+              _showFirmwareInfo(context);
+            }),
           ]),
           const SizedBox(height: 12),
           _buildMenuGroup([
-            _menuItem(Icons.notifications, '消息设置', () {}),
+            _menuItem(Icons.lock_outline, '修改密码', () {
+              _showChangePasswordDialog(context);
+            }),
             _divider(),
-            _menuItem(Icons.language, '多语言', () {}),
+            _menuItem(Icons.language, '多语言', () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('多语言功能开发中'), duration: Duration(seconds: 1)),
+              );
+            }),
             _divider(),
-            _menuItem(Icons.info_outline, '关于', () {}),
+            _menuItem(Icons.info_outline, '关于', () {
+              _showAboutDialog(context);
+            }),
           ]),
           const SizedBox(height: 24),
           Padding(
@@ -109,6 +122,131 @@ class ProfilePage extends StatelessWidget {
           const SizedBox(height: 40),
         ],
       ),
+    );
+  }
+
+  void _showChangePasswordDialog(BuildContext context) {
+    final oldCtrl = TextEditingController();
+    final newCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改密码'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: oldCtrl, obscureText: true, decoration: const InputDecoration(labelText: '旧密码', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            TextField(controller: newCtrl, obscureText: true, decoration: const InputDecoration(labelText: '新密码', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            TextField(controller: confirmCtrl, obscureText: true, decoration: const InputDecoration(labelText: '确认新密码', border: OutlineInputBorder())),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () async {
+              if (newCtrl.text != confirmCtrl.text) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('两次密码不一致')));
+                return;
+              }
+              if (newCtrl.text.length < 6) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密码长度不能少于6位')));
+                return;
+              }
+              final resp = await ApiClient.put('/user/password', {
+                'old_password': oldCtrl.text,
+                'new_password': newCtrl.text,
+              });
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (resp.ok) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密码修改成功')));
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(resp.msg)));
+              }
+            },
+            child: const Text('确认'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showShareDialog(BuildContext context) {
+    final snCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('设备共享'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('输入对方手机号共享您的设备', style: TextStyle(color: Color(0xFF999999), fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(controller: snCtrl, decoration: const InputDecoration(labelText: '对方手机号', border: OutlineInputBorder())),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () async {
+              if (snCtrl.text.isEmpty) return;
+              final resp = await ApiClient.get('/device/share', params: {'page': 1, 'size': 50});
+              if (ctx.mounted) Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(resp.ok ? '共享列表已加载' : resp.msg)),
+              );
+            },
+            child: const Text('查看共享'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFirmwareInfo(BuildContext context) async {
+    final resp = await ApiClient.getOTAFirmwareList();
+    if (context.mounted) {
+      final list = (resp.data is Map<String, dynamic> ? (resp.data['list'] ?? []) : []) as List;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('固件升级'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: list.isEmpty
+                ? const Text('暂无可用固件', style: TextStyle(color: Color(0xFF999999)))
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: list.length,
+                    itemBuilder: (_, i) {
+                      final fw = list[i];
+                      return ListTile(
+                        title: Text('v${fw['version'] ?? ''}'),
+                        subtitle: Text(fw['changelog'] ?? '无更新说明'),
+                        trailing: Text(fw['status'] ?? '', style: const TextStyle(fontSize: 12)),
+                      );
+                    },
+                  ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+        ),
+      );
+    }
+  }
+
+  void _showAboutDialog(BuildContext context) {
+    showAboutDialog(
+      context: context,
+      applicationName: '云智能',
+      applicationVersion: '1.0.0',
+      applicationLegalese: '© 2026 飞燕IoT平台',
+      children: [
+        const Text('基于阿里云飞燕平台标准开发的物联网管理应用'),
+        const SizedBox(height: 8),
+        const Text('支持设备管理、场景联动、OTA升级等功能'),
+      ],
     );
   }
 
