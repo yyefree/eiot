@@ -211,7 +211,7 @@ func SeedDemoData(adminPhone, adminPassword string) {
 			dao.DB.Create(&model.Device{
 				DeviceName: fmt.Sprintf("%s-%03d", s.Name, i),
 				DeviceSN:   sn, DeviceSecret: "secret_" + sn,
-				ProductID: prod.ID, ProductKey: s.ProductKey, Status: 1,
+				ProductID: prod.ID, ProductKey: s.ProductKey, OwnerID: admin.ID, Status: 1,
 			})
 		}
 	}
@@ -646,7 +646,9 @@ func ShareDevice(uid uint, deviceID uint, shareUID uint, permission string, exp 
 	if d.ID == 0 {
 		return errors.New("设备不存在")
 	}
-	if d.OwnerID != uid {
+	var u model.User
+	dao.DB.First(&u, uid)
+	if d.OwnerID != uid && u.Role != "admin" {
 		return errors.New("仅设备所有者可发起共享")
 	}
 	share := model.DeviceShare{
