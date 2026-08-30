@@ -15,7 +15,7 @@ var DB *gorm.DB
 // InitMySQL 初始化 MySQL 连接
 func InitMySQL(cfg config.MySQLConf) error {
 	var err error
-	// 重试 3 次，等待数据库服务完全就绪
+	// 重试 5 次，等待数据库服务完全就绪
 	for i := 0; i < 5; i++ {
 		DB, err = gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{})
 		if err == nil {

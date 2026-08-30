@@ -97,9 +97,9 @@ const form = ref({ device_id: null, share_user_id: null, permission: 'read', hou
 
 const load = async () => {
   try {
-    const data = await request.get('/device/share', { params: { page: page.value, pageSize: pageSize.value } })
-    list.value = data?.list || data?.items || data || []
-    total.value = data?.total || list.value.length
+    const data = await request.get('/device/share', { params: { page: page.value, size: pageSize.value } })
+    list.value = Array.isArray(data?.list) ? data.list : Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
+    total.value = data?.total ?? list.value.length
   } catch (e) {
     list.value = []
     total.value = 0
@@ -108,8 +108,8 @@ const load = async () => {
 
 const loadDevices = async () => {
   try {
-    const data = await request.get('/device', { params: { pageSize: 100 } })
-    devices.value = data?.list || data?.items || data || []
+    const data = await request.get('/device', { params: { page: 1, size: 100 } })
+    devices.value = Array.isArray(data?.list) ? data.list : Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
   } catch (e) { devices.value = [] }
 }
 

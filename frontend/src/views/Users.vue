@@ -62,9 +62,9 @@ const pageSize = ref(10)
 
 const load = async () => {
   try {
-    const data = await request.get('/admin/user', { params: { page: page.value, pageSize: pageSize.value } })
-    list.value = data?.list || data?.items || data || []
-    total.value = data?.total || list.value.length
+    const data = await request.get('/admin/user', { params: { page: page.value, size: pageSize.value } })
+    list.value = Array.isArray(data?.list) ? data.list : Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
+    total.value = data?.total ?? list.value.length
   } catch (e) {
     list.value = []
     total.value = 0

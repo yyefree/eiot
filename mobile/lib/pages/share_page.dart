@@ -62,7 +62,10 @@ class _SharePageState extends State<SharePage> {
                         subtitle: Text('共享给用户 #${s['share_user_id'] ?? '-'}'),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete_outline, color: Colors.red),
-                          onPressed: () => _revoke(s['id'] as int),
+                          onPressed: () {
+                            final id = s['id'];
+                            if (id != null) _revoke(id as int);
+                          },
                         ),
                       ),
                     );

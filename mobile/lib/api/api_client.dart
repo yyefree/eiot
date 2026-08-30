@@ -11,12 +11,21 @@ class ApiResponse {
 }
 
 class ApiClient {
-  static const String baseUrl = 'http://192.168.31.31:8080/api';
+  static String _baseUrl = 'http://localhost:8080/api';
   static String? _token;
+
+  static String get baseUrl => _baseUrl;
 
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('eiot_token');
+    _baseUrl = prefs.getString('eiot_base_url') ?? 'http://localhost:8080/api';
+  }
+
+  static Future<void> setBaseUrl(String url) async {
+    _baseUrl = url;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('eiot_base_url', url);
   }
 
   static Future<void> saveToken(String token) async {
@@ -41,26 +50,42 @@ class ApiClient {
   static Future<ApiResponse> get(String path, {Map<String, dynamic>? params}) async {
     var url = '$baseUrl$path';
     if (params != null && params.isNotEmpty) {
-      final q = params.entries.where((e) => e.value != null).map((e) => '${e.key}=${e.value}').join('&');
+      final q = params.entries.where((e) => e.value != null).map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent('${e.value}')}'  ).join('&');
       url += '?$q';
     }
-    final resp = await http.get(Uri.parse(url), headers: _headers);
-    return _parse(resp);
+    try {
+      final resp = await http.get(Uri.parse(url), headers: _headers).timeout(const Duration(seconds: 15));
+      return _parse(resp);
+    } catch (e) {
+      return ApiResponse(code: -1, msg: '网络连接失败', data: null);
+    }
   }
 
   static Future<ApiResponse> post(String path, Map<String, dynamic> body) async {
-    final resp = await http.post(Uri.parse('$baseUrl$path'), headers: _headers, body: jsonEncode(body));
-    return _parse(resp);
+    try {
+      final resp = await http.post(Uri.parse('$baseUrl$path'), headers: _headers, body: jsonEncode(body)).timeout(const Duration(seconds: 15));
+      return _parse(resp);
+    } catch (e) {
+      return ApiResponse(code: -1, msg: '网络连接失败', data: null);
+    }
   }
 
   static Future<ApiResponse> put(String path, Map<String, dynamic> body) async {
-    final resp = await http.put(Uri.parse('$baseUrl$path'), headers: _headers, body: jsonEncode(body));
-    return _parse(resp);
+    try {
+      final resp = await http.put(Uri.parse('$baseUrl$path'), headers: _headers, body: jsonEncode(body)).timeout(const Duration(seconds: 15));
+      return _parse(resp);
+    } catch (e) {
+      return ApiResponse(code: -1, msg: '网络连接失败', data: null);
+    }
   }
 
   static Future<ApiResponse> delete(String path) async {
-    final resp = await http.delete(Uri.parse('$baseUrl$path'), headers: _headers);
-    return _parse(resp);
+    try {
+      final resp = await http.delete(Uri.parse('$baseUrl$path'), headers: _headers).timeout(const Duration(seconds: 15));
+      return _parse(resp);
+    } catch (e) {
+      return ApiResponse(code: -1, msg: '网络连接失败', data: null);
+    }
   }
 
   static ApiResponse _parse(http.Response resp) {

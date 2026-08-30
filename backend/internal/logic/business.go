@@ -5,22 +5,44 @@ import (
 	"eiot/internal/model"
 	"eiot/pkg/cache"
 	"eiot/pkg/util"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// codeStore 保存验证码（内存存储，简化解法
+// codeStore 保存验证码（内存存储，简化解法）
 type codeItem struct {
 	Code  string
 	Until time.Time
 }
 
-var codeMap = map[string]*codeItem{}
+var (
+	codeMap = map[string]*codeItem{}
+	codeMu  sync.RWMutex
+)
+
+func init() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			codeMu.Lock()
+			now := time.Now()
+			for k, v := range codeMap {
+				if now.After(v.Until) {
+					delete(codeMap, k)
+				}
+			}
+			codeMu.Unlock()
+		}
+	}()
+}
 
 // ========== 认证 ==========
 
@@ -44,18 +66,6 @@ func LoginByPassword(phone, password, secret string) (string, *model.User, error
 	return token, &u, err
 }
 
-func createAdmin(secret string) (string, *model.User, error) {
-	hashed, _ := util.HashPassword("admin123")
-	u := &model.User{
-		Username: "admin", Phone: "13800000000", Password: hashed,
-		Nickname: "超级管理员", Role: "admin", Status: 1,
-	}
-	if err := dao.DB.Create(u).Error; err != nil {
-		return "", nil, err
-	}
-	token, _ := util.GenerateJWT(u.ID, u.Role, secret)
-	return token, u, nil
-}
 
 // SendCode 发送验证码
 func SendCode(phoneOrEmail string) (string, error) {
@@ -63,29 +73,39 @@ func SendCode(phoneOrEmail string) (string, error) {
 		return "", errors.New("请输入手机号或邮箱")
 	}
 	code := util.GenerateCode()
+	codeMu.Lock()
 	codeMap[phoneOrEmail] = &codeItem{Code: code, Until: time.Now().Add(10 * time.Minute)}
+	codeMu.Unlock()
 	return code, nil
 }
 
 // LoginOrRegisterByCode 使用验证码登录或注册
 func LoginOrRegisterByCode(phone, code, secret string) (string, *model.User, error) {
+	codeMu.Lock()
 	item, ok := codeMap[phone]
 	if !ok || item == nil || time.Now().After(item.Until) {
+		codeMu.Unlock()
 		return "", nil, errors.New("验证码无效或已过期")
 	}
-	if item.Code != code {
+	if subtle.ConstantTimeCompare([]byte(item.Code), []byte(code)) != 1 {
+		codeMu.Unlock()
 		return "", nil, errors.New("验证码错误")
 	}
-	// 验证码一次性使用
 	delete(codeMap, phone)
+	codeMu.Unlock()
+
+	nickname := "用户"
+	if len(phone) >= 4 {
+		nickname = "用户" + phone[len(phone)-4:]
+	}
+
 	var u model.User
 	err := dao.DB.Where("phone = ?", phone).First(&u).Error
 	if err != nil {
-		// 新注册用户
 		hashed, _ := util.HashPassword("123456")
 		u = model.User{
 			Username: "u_" + phone, Phone: phone, Password: hashed,
-			Nickname: "用户" + phone[len(phone)-4:],
+			Nickname: nickname,
 			Role: "user", Status: 1,
 		}
 		if err := dao.DB.Create(&u).Error; err != nil {
@@ -211,7 +231,6 @@ func SeedDemoData(adminPhone, adminPassword string) {
 	// 填充最新模拟数据
 	var allDevices []model.Device
 	dao.DB.Find(&allDevices)
-	rand.Seed(time.Now().UnixNano())
 	for _, d := range allDevices {
 		cache.SetOnline(d.DeviceSN, true, 300)
 		cache.SetLatest(d.DeviceSN, "temperature", fmt.Sprintf("%.1f", 20+rand.Float64()*10))
@@ -463,12 +482,14 @@ func BatchGenerateDevicesWithMode(productID uint, prefix string, count int, bind
 }
 
 // ListDevices 设备列表（admin 全量/用户视角
-func ListDevices(uid uint, role string, page, size int) (int64, []model.Device, error) {
+func ListDevices(uid uint, role string, page, size int, productID uint) (int64, []model.Device, error) {
 	var total int64
 	var list []model.Device
 	query := dao.DB.Model(&model.Device{})
+	if productID > 0 {
+		query = query.Where("product_id = ?", productID)
+	}
 	if role != "admin" {
-		// 用户可见：自己拥有 + 共享给自己的
 		shared := []uint{}
 		dao.DB.Table("device_shares").Where("share_user_id = ?", uid).Pluck("device_id", &shared)
 		inIDs := append([]uint{}, shared...)

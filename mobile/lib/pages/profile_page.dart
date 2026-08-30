@@ -16,7 +16,7 @@ class ProfilePage extends StatelessWidget {
         CircleAvatar(
           radius: 48,
           child: Text(
-            (user?.nickname ?? '?')[0].toUpperCase(),
+            (user?.nickname?.isNotEmpty == true ? user!.nickname! : '?')[0].toUpperCase(),
             style: const TextStyle(fontSize: 36),
           ),
         ),

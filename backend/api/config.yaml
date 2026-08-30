@@ -1,12 +1,13 @@
 Name: eiot-api
 Host: 0.0.0.0
 Port: 8080
-JWTSecret: eiot-super-secret-key-change-me
+# 生产环境请通过环境变量 EIOT_JWT_SECRET 覆盖，切勿使用默认值
+JWTSecret: "change-me-in-production"
 AdminPhone: "13800000000"
 AdminPassword: "admin123"
-# CORS 白名单，逗号分隔，* 表示允许所有（开发环境）
+# CORS 白名单，逗号分隔，* 表示允许所有（仅开发环境使用）
 # 生产环境请填写具体域名，如：https://admin.example.com,https://m.example.com
-CORSOrigins: "*"
+CORSOrigins: "http://localhost:8088,http://localhost:5173"
 MySQL:
   DSN: "root:eiot@tcp(mysql:3306)/eiot?charset=utf8mb4&parseTime=True&loc=Local"
 Redis:
@@ -18,5 +19,5 @@ TDengine:
 EMQX:
   Broker: "tcp://emqx:1883"
   Username: "eiot"
-  Password: "eiot2026"
+  Password: ""
   ClientID: "eiot-backend"

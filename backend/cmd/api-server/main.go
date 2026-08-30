@@ -9,12 +9,15 @@ import (
 	"eiot/pkg/config"
 	"eiot/pkg/mqtt"
 	"eiot/pkg/tsdb"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -56,6 +59,12 @@ func applyEnv(c *config.Config) {
 	if v := os.Getenv("EIOT_EMQX"); v != "" {
 		c.EMQX.Broker = v
 	}
+	if v := os.Getenv("EIOT_EMQX_USER"); v != "" {
+		c.EMQX.Username = v
+	}
+	if v := os.Getenv("EIOT_EMQX_PASS"); v != "" {
+		c.EMQX.Password = v
+	}
 	if v := os.Getenv("EIOT_PORT"); v != "" {
 		var p int
 		if _, err := fmt.Sscanf(v, "%d", &p); err == nil && p > 0 {
@@ -74,7 +83,7 @@ func main() {
 	log.Printf("[EIOT] starting server %s:%d", c.Host, c.Port)
 
 	if err := dao.InitMySQL(c.MySQL); err != nil {
-		log.Printf("[WARN] MySQL init failed: %v", err)
+		log.Fatalf("[FATAL] MySQL init failed: %v", err)
 	}
 
 	logic.InitAdmin(c.AdminPhone, c.AdminPassword)
@@ -141,6 +150,9 @@ func main() {
 
 	// CORS
 	origins := sc.Config.CORSOrigins
+	if origins == "" {
+		origins = "http://localhost:8088,http://localhost:5173"
+	}
 	r.Use(func(ctx *gin.Context) {
 		origin := ctx.GetHeader("Origin")
 		allowOrigin := "*"
@@ -195,7 +207,23 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", c.Host, c.Port)
 	log.Printf("[EIOT] listening on %s", addr)
 	srv := &http.Server{Addr: addr, Handler: r}
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("server error: %v", err)
+
+	// 优雅关机
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("[EIOT] shutting down...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("[EIOT] forced shutdown: %v", err)
 	}
+	log.Println("[EIOT] server stopped")
 }

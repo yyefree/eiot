@@ -14,6 +14,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
   DeviceDetail? _detail;
   bool _loading = true;
   final Map<String, dynamic> _controlValues = {};
+  final Map<String, TextEditingController> _textControllers = {};
 
   @override
   void initState() {
@@ -50,7 +51,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
 
   Future<void> _sendCommand(ThingProperty p) async {
     final resp = await ApiClient.post('/device/${widget.deviceId}/control', {
-      'params': {p.identifier: _controlValues[p.identifier]},
+      p.identifier: _controlValues[p.identifier],
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -208,7 +209,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
             children: [
               Expanded(
                 child: TextField(
-                  controller: TextEditingController(text: _controlValues[p.identifier]?.toString() ?? ''),
+                  controller: _textControllers.putIfAbsent(p.identifier, () =>
+                    TextEditingController(text: _controlValues[p.identifier]?.toString() ?? '')),
                   onChanged: (v) => _controlValues[p.identifier] = v,
                   decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
                 ),

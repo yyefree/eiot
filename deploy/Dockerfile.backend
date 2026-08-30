@@ -1,8 +1,20 @@
+# Stage 1: Build
+FROM golang:1.24-alpine AS builder
+ENV GOPROXY=https://goproxy.cn,direct GONOSUMCHECK=* GOFLAGS=-insecure
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/eiot-server ./cmd/api-server
+
+# Stage 2: Runtime
 FROM alpine:3.19
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata && \
+    addgroup -S eiot && adduser -S -G eiot eiot
 ENV TZ=Asia/Shanghai
 WORKDIR /app
-COPY deploy/eiot-server ./eiot-server
-RUN chmod +x /app/eiot-server
+COPY --from=builder /app/eiot-server ./eiot-server
+RUN chmod +x /app/eiot-server && chown -R eiot:eiot /app
+USER eiot
 EXPOSE 8080
 CMD ["/app/eiot-server"]

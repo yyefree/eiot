@@ -141,8 +141,10 @@ const loadUser = async () => {
     userInfo.value = data || {}
     localStorage.setItem('eiot_user', JSON.stringify(userInfo.value))
   } catch (e) {
-    const cached = localStorage.getItem('eiot_user')
-    if (cached) userInfo.value = JSON.parse(cached)
+    try {
+      const cached = localStorage.getItem('eiot_user')
+      if (cached) userInfo.value = JSON.parse(cached)
+    } catch (_) {}
   }
 }
 

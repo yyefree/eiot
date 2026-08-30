@@ -48,7 +48,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Key, Connection } from '@element-plus/icons-vue'
@@ -63,19 +63,23 @@ const codeFormRef = ref()
 const passwordForm = ref({ phone: '', password: '' })
 const codeForm = ref({ phone: '', code: '' })
 const codeCountdown = ref(0)
+let countdownTimer = null
+
+onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
 
 const submitPassword = async () => {
   try {
     await passwordFormRef.value.validate()
     loading.value = true
     const data = await request.post('/auth/login', passwordForm.value)
-    const token = data?.token || data?.accessToken || data
+    const token = typeof data === 'string' ? data : data?.token || data?.accessToken
+    if (!token) { ElMessage.error('登录失败: 未获取到令牌'); return }
     localStorage.setItem('eiot_token', token)
     if (data?.user) localStorage.setItem('eiot_user', JSON.stringify(data.user))
     ElMessage.success('登录成功')
     router.push('/')
   } catch (e) {
-    console.error(e)
+    ElMessage.error(e?.message || '登录失败，请重试')
   } finally {
     loading.value = false
   }
@@ -90,12 +94,13 @@ const sendCode = async () => {
     await request.post('/auth/send-code', { phone: codeForm.value.phone })
     ElMessage.success('验证码已发送')
     codeCountdown.value = 60
-    const t = setInterval(() => {
+    if (countdownTimer) clearInterval(countdownTimer)
+    countdownTimer = setInterval(() => {
       codeCountdown.value--
-      if (codeCountdown.value <= 0) clearInterval(t)
+      if (codeCountdown.value <= 0) { clearInterval(countdownTimer); countdownTimer = null }
     }, 1000)
   } catch (e) {
-    console.error(e)
+    ElMessage.error(e?.message || '发送失败，请重试')
   }
 }
 
@@ -104,13 +109,14 @@ const submitCode = async () => {
     await codeFormRef.value.validate()
     loading.value = true
     const data = await request.post('/auth/login-code', codeForm.value)
-    const token = data?.token || data?.accessToken || data
+    const token = typeof data === 'string' ? data : data?.token || data?.accessToken
+    if (!token) { ElMessage.error('登录失败: 未获取到令牌'); return }
     localStorage.setItem('eiot_token', token)
     if (data?.user) localStorage.setItem('eiot_user', JSON.stringify(data.user))
     ElMessage.success('登录成功')
     router.push('/')
   } catch (e) {
-    console.error(e)
+    ElMessage.error(e?.message || '登录失败，请重试')
   } finally {
     loading.value = false
   }

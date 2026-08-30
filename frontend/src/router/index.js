@@ -28,6 +28,12 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('eiot_token')
   if (!token && to.path !== '/login') {
     next('/login')
+  } else if (to.path === '/users' || to.path === '/mobile-ui') {
+    try {
+      const user = JSON.parse(localStorage.getItem('eiot_user') || '{}')
+      if (user.role !== 'admin') { next('/dashboard'); return }
+    } catch (_) {}
+    next()
   } else {
     next()
   }

@@ -94,9 +94,9 @@ const batchForm = ref({ productId: null, count: 10, prefix: 'DEV-' })
 
 const load = async () => {
   try {
-    const data = await request.get('/admin/device', { params: { page: page.value, pageSize: pageSize.value } })
-    list.value = data?.list || data?.items || data || []
-    total.value = data?.total || list.value.length
+    const data = await request.get('/admin/device', { params: { page: page.value, size: pageSize.value } })
+    list.value = Array.isArray(data?.list) ? data.list : Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
+    total.value = data?.total ?? list.value.length
   } catch (e) {
     list.value = []
     total.value = 0
@@ -105,8 +105,8 @@ const load = async () => {
 
 const loadProducts = async () => {
   try {
-    const data = await request.get('/admin/product', { params: { pageSize: 100 } })
-    products.value = data?.list || data?.items || data || []
+    const data = await request.get('/admin/product', { params: { page: 1, size: 100 } })
+    products.value = Array.isArray(data?.list) ? data.list : Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
   } catch (e) { products.value = [] }
 }
 

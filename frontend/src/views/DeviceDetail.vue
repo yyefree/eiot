@@ -88,13 +88,7 @@ const load = async () => {
     })
   } catch (e) {
     console.error(e)
-    device.value = { id: id.value, name: 'Demo-Device-01', productName: '智能温控器', online: true, deviceKey: 'dk_demo_001', createdAt: '2025-01-01 10:00' }
-    latest.value = { temperature: 25.5, humidity: 60 }
-    properties.value = [
-      { identifier: 'temperature', name: '温度', _dataType: 'float', _unit: '℃', _min: 0, _max: 40, accessMode: 'rw' },
-      { identifier: 'power', name: '开关', _dataType: 'bool', _unit: '', accessMode: 'rw' }
-    ]
-    properties.value.forEach(p => { controlValues[p.identifier] = p._dataType === 'bool' ? false : (p._min || 0) })
+    ElMessage.error('加载设备详情失败')
   }
 }
 
@@ -102,7 +96,9 @@ const sendCommand = async (p) => {
   try {
     await request.post('/device/' + id.value + '/control', { [p.identifier]: controlValues[p.identifier] })
     ElMessage.success(p.name + ' 指令下发成功')
-  } catch (e) { console.error(e) }
+  } catch (e) {
+    ElMessage.error(p.name + ' 指令下发失败')
+  }
 }
 
 const formatValue = (v) => {

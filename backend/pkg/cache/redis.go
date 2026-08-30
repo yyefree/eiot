@@ -51,7 +51,9 @@ func SetLatest(deviceSN, key string, value interface{}) {
 	if RDB == nil || deviceSN == "" {
 		return
 	}
-	RDB.HSet(context.Background(), "device:latest:"+deviceSN, key, value)
+	ctx := context.Background()
+	RDB.HSet(ctx, "device:latest:"+deviceSN, key, value)
+	RDB.Expire(ctx, "device:latest:"+deviceSN, 24*time.Hour)
 }
 
 // GetLatest 获取设备最新值

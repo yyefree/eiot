@@ -1,7 +1,9 @@
 package util
 
 import (
+	"crypto/rand"
 	"errors"
+	"math/big"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -55,12 +57,12 @@ func ParseJWT(tokenStr, secret string) (jwt.MapClaims, error) {
 	return nil, errors.New("invalid token")
 }
 
-// GenerateCode 生成 6 位验证码
+// GenerateCode 生成 6 位验证码（使用 crypto/rand 保证不可预测）
 func GenerateCode() string {
-	n := time.Now().UnixNano()
 	code := ""
 	for i := 0; i < 6; i++ {
-		code += string(rune('0' + int((n>>(i*3))&0x7)%10))
+		n, _ := rand.Int(rand.Reader, big.NewInt(10))
+		code += string(rune('0' + n.Int64()))
 	}
 	return code
 }

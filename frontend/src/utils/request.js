@@ -26,7 +26,7 @@ request.interceptors.response.use(
       // 认证失效跳转登录
       if (data.code === 401 || data.code === 403) {
         localStorage.removeItem('eiot_token')
-        router.push('/login')
+        if (window.location.hash !== '#/login') router.push('/login')
       }
       ElMessage.error(data.msg || '请求失败')
       return Promise.reject(new Error(data.msg || '请求失败'))
@@ -39,7 +39,7 @@ request.interceptors.response.use(
     ElMessage.error(msg)
     if (error.response?.status === 401 || error.response?.status === 403) {
       localStorage.removeItem('eiot_token')
-      router.push('/login')
+      if (window.location.hash !== '#/login') router.push('/login')
     }
     return Promise.reject(error)
   }

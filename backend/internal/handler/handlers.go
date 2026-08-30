@@ -222,13 +222,17 @@ func NewBizError(httpCode, bizCode int, msg string) *BizError {
 func wrap(sc *svc.ServiceContext, h func(c *gin.Context, sc *svc.ServiceContext) (interface{}, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		data, err := h(c, sc)
+		// 如果 handler 已经直接写入响应（如 CSV 导出），不再追加 JSON
+		if c.Writer.Written() {
+			return
+		}
 		if err != nil {
 			if be, ok := err.(*BizError); ok {
 				c.JSON(be.HTTPCode, gin.H{"code": be.Code, "msg": be.Message, "data": nil})
 				return
 			}
-			// 默认 400 Bad Request
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error(), "data": nil})
+			// 默认 500 Internal Server Error
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "服务器内部错误", "data": nil})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": data})
@@ -263,6 +267,9 @@ func pageSize(c *gin.Context) (int, int) {
 	if sz <= 0 {
 		sz = 20
 	}
+	if sz > 200 {
+		sz = 200
+	}
 	return p, sz
 }
 
@@ -285,11 +292,11 @@ func handleSendCode(c *gin.Context, sc *svc.ServiceContext) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	code, err := logic.SendCode(sVal(b["phone"]))
+	_, err = logic.SendCode(sVal(b["phone"]))
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"phone": b["phone"], "code": code, "expire_sec": 600}, nil
+	return gin.H{"expire_sec": 600}, nil
 }
 
 func handleLoginCode(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
@@ -510,12 +517,10 @@ func handleExportDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, er
 	if err := dao.DB.Where("product_id = ?", id).Find(&devices).Error; err != nil {
 		return nil, err
 	}
-	// 飞燕标准三元组 CSV 导出
-	out := "DeviceName,DeviceSN,ProductKey,BindMode,DeviceSecret,ProductSecret\n"
+	// 飞燕标准三元组 CSV 导出（不包含密钥）
+	out := "DeviceName,DeviceSN,ProductKey,BindMode\n"
 	for _, d := range devices {
-		deviceSecret := d.DeviceSecret
-		productSecret := d.ProductSecret
-		out += fmt.Sprintf("%q,%q,%q,%q,%q,%q\n", d.DeviceName, d.DeviceSN, d.ProductKey, d.BindMode, deviceSecret, productSecret)
+		out += fmt.Sprintf("%q,%q,%q,%q\n", d.DeviceName, d.DeviceSN, d.ProductKey, d.BindMode)
 	}
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", "attachment; filename=devices_"+strconv.Itoa(int(id))+".csv")
@@ -525,7 +530,11 @@ func handleExportDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, er
 
 func handleListDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
 	page, size := pageSize(c)
-	total, list, err := logic.ListDevices(0, "admin", page, size)
+	var pid uint
+	if v := c.Query("product_id"); v != "" {
+		fmt.Sscanf(v, "%d", &pid)
+	}
+	total, list, err := logic.ListDevices(0, "admin", page, size, pid)
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +574,7 @@ func handleBindDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, erro
 
 func handleListDeviceUser(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
 	page, size := pageSize(c)
-	total, list, err := logic.ListDevices(middleware.UID(c), middleware.Role(c), page, size)
+	total, list, err := logic.ListDevices(middleware.UID(c), middleware.Role(c), page, size, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -761,6 +770,7 @@ func handleAdminStats(c *gin.Context, sc *svc.ServiceContext) (interface{}, erro
 		"users":         userTotal,
 		"online":        online,
 		"offline":       offline,
+		"thingModels":   productTotal,
 		"devices_list":  deviceItems,
 	}, nil
 }
@@ -858,11 +868,11 @@ func handleDeviceBindQR(c *gin.Context, sc *svc.ServiceContext) (interface{}, er
 	if err := dao.DB.First(&d, id).Error; err != nil {
 		return nil, errors.New("设备不存在")
 	}
-	// 返回三元组供客户端生成二维码
+	// 返回三元组供客户端生成二维码（不含 DeviceSecret）
 	return gin.H{
 		"product_key": d.ProductKey,
 		"device_name": d.DeviceName,
 		"device_sn":   d.DeviceSN,
-		"bind_url": fmt.Sprintf("eiot://bind?pk=%s&dn=%s&ds=%s", d.ProductKey, d.DeviceName, d.DeviceSecret),
+		"bind_url": fmt.Sprintf("eiot://bind?pk=%s&dn=%s&sn=%s", d.ProductKey, d.DeviceName, d.DeviceSN),
 	}, nil
 }

@@ -194,16 +194,18 @@ const loadProjects = async () => {
   try {
     const res = await request.get('/admin/project', { params: { page: 1, size: 100 } })
     projects.value = res?.list || []
-  } catch {}
+  } catch (e) {
+    console.error(e)
+  }
 }
 
 const load = async () => {
   try {
-    const params = { page: page.value, pageSize: pageSize.value }
+    const params = { page: page.value, size: pageSize.value }
     if (filterProject.value) params.project_id = filterProject.value
     const data = await request.get('/admin/product', { params })
-    list.value = data?.list || data?.items || data || []
-    total.value = data?.total || list.value.length
+    list.value = Array.isArray(data?.list) ? data.list : Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
+    total.value = data?.total ?? list.value.length
   } catch (e) {
     console.error(e)
     list.value = []
@@ -267,7 +269,7 @@ const openEdit = async (row) => {
 const showQR = async (row) => {
   // 取该产品的第一台设备做演示
   try {
-    const res = await request.get('/admin/device', { params: { product_id: row.id, page: 1, pageSize: 1 } })
+    const res = await request.get('/admin/device', { params: { product_id: row.id, page: 1, size: 1 } })
     const dev = res?.list?.[0]
     if (!dev) { ElMessage.warning('该产品下暂无设备'); return }
     const qr = await request.get('/admin/device/' + dev.id + '/bind-qr')
@@ -329,7 +331,7 @@ const submit = async () => {
     dialogVisible.value = false
     load()
   } catch (e) {
-    console.error(e)
+    ElMessage.error('保存失败: ' + (e?.response?.data?.message || e.message || '未知错误'))
   } finally {
     saving.value = false
   }

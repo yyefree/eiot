@@ -36,8 +36,13 @@ class AuthProvider extends ChangeNotifier {
     _loading = false;
     if (resp.ok && resp.data != null) {
       final data = resp.data as Map<String, dynamic>;
-      await ApiClient.saveToken(data['token'] as String);
-      _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+      final token = data['token'] as String?;
+      if (token != null) {
+        await ApiClient.saveToken(token);
+      }
+      if (data['user'] != null) {
+        _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+      }
       notifyListeners();
       return true;
     }
@@ -45,12 +50,9 @@ class AuthProvider extends ChangeNotifier {
     return false;
   }
 
-  Future<String?> sendCode(String phone) async {
+  Future<bool> sendCode(String phone) async {
     final resp = await ApiClient.post('/auth/send-code', {'phone': phone});
-    if (resp.ok && resp.data != null) {
-      return resp.data['code'] as String?;
-    }
-    return null;
+    return resp.ok;
   }
 
   Future<bool> loginByCode(String phone, String code) async {
@@ -60,8 +62,13 @@ class AuthProvider extends ChangeNotifier {
     _loading = false;
     if (resp.ok && resp.data != null) {
       final data = resp.data as Map<String, dynamic>;
-      await ApiClient.saveToken(data['token'] as String);
-      _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+      final token = data['token'] as String?;
+      if (token != null) {
+        await ApiClient.saveToken(token);
+      }
+      if (data['user'] != null) {
+        _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+      }
       notifyListeners();
       return true;
     }

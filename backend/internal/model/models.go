@@ -64,15 +64,15 @@ type Device struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	DeviceName string    `gorm:"size:128" json:"device_name"`
 	DeviceSN   string    `gorm:"size:64;uniqueIndex" json:"device_sn"`
-	DeviceSecret string  `gorm:"size:128" json:"-"`                  // 一机一密密钥
-	ProductSecret string `gorm:"size:128" json:"-"`                  // 一型一密密钥（同产品共用）
-	ProductID  uint      `json:"product_id"`
+	DeviceSecret string  `gorm:"size:128" json:"-"`
+	ProductSecret string `gorm:"size:128" json:"-"`
+	ProductID  uint      `gorm:"index" json:"product_id"`
 	ProductKey string    `gorm:"size:64" json:"product_key"`
-	OwnerID    uint      `json:"owner_id"`
-	Status     int       `gorm:"default:1" json:"status"`           // 1 正常 0 禁用
-	BindMode   string    `gorm:"size:16;default:device_secret" json:"bind_mode"` // device_secret(一机一密) / product_secret(一型一密)
-	FirmwareVer string   `gorm:"size:32" json:"firmware_ver"`        // 固件版本
-	IPAddress  string    `gorm:"size:45" json:"ip_address"`          // 最近一次上报IP
+	OwnerID    uint      `gorm:"index" json:"owner_id"`
+	Status     int       `gorm:"default:1" json:"status"`
+	BindMode   string    `gorm:"size:16;default:device_secret" json:"bind_mode"`
+	FirmwareVer string   `gorm:"size:32" json:"firmware_ver"`
+	IPAddress  string    `gorm:"size:45" json:"ip_address"`
 	LastOnline *time.Time `json:"last_online"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
@@ -81,9 +81,9 @@ type Device struct {
 // DeviceShare 设备共享
 type DeviceShare struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
-	DeviceID   uint      `json:"device_id"`
-	ShareUserID uint    `json:"share_user_id"`
-	Permission string    `gorm:"size:32;default:read" json:"permission"` // read / control
+	DeviceID   uint      `gorm:"index" json:"device_id"`
+	ShareUserID uint    `gorm:"index" json:"share_user_id"`
+	Permission string    `gorm:"size:32;default:read" json:"permission"`
 	ExpireAt  *time.Time `json:"expire_at"`
 	CreatedBy uint      `json:"created_by"`
 	CreatedAt time.Time `json:"created_at"`
@@ -102,18 +102,18 @@ type UserDeviceUI struct {
 // OperationLog 操作日志
 type OperationLog struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    uint      `json:"user_id"`
+	UserID    uint      `gorm:"index" json:"user_id"`
 	Action    string    `gorm:"size:255" json:"action"`
 	Target    string    `gorm:"size:255" json:"target"`
 	Detail    string    `gorm:"size:1024" json:"detail"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Dashboard 用户看板配置（Web 拖拽看板（支持用户个人看板
+// Dashboard 用户看板配置
 type Dashboard struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
-	OwnerID    uint      `json:"owner_id"`
-	Type       string    `gorm:"size:32" json:"type"` // web
+	OwnerID    uint      `gorm:"index" json:"owner_id"`
+	Type       string    `gorm:"size:32" json:"type"`
 	Name       string    `gorm:"size:128" json:"name"`
 	LayoutJSON string    `gorm:"type:text" json:"layout_json"`
 	IsDefault  int       `gorm:"default:0" json:"is_default"`

@@ -43,8 +43,8 @@ services:
       - EMQX_NAME=eiot-broker
       - EMQX_NODE__NAME=eiot-broker@eiot-emqx
       - EMQX_LISTENERS__TCP__DEFAULT__BIND=0.0.0.0:1883
-    ports:
-      - "18083:18083"
+      - EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASS:-admin}
     volumes:
       - eiot-emqx-data:/opt/emqx/data
       - eiot-emqx-log:/opt/emqx/log
@@ -67,9 +67,11 @@ services:
       EIOT_DB: "root:eiot@tcp(mysql:3306)/eiot?charset=utf8mb4&parseTime=True&loc=Local"
       EIOT_REDIS: "redis:6379"
       EIOT_EMQX: "tcp://emqx:1883"
-      EIOT_JWT_SECRET: "eiot-super-secret-key-change-me"
-      EIOT_ADMIN_PHONE: "13800000000"
-      EIOT_ADMIN_PASSWORD: "admin123"
+      EIOT_JWT_SECRET: "${EIOT_JWT_SECRET:-change-me-in-production}"
+      EIOT_ADMIN_PHONE: "${EIOT_ADMIN_PHONE:-13800000000}"
+      EIOT_ADMIN_PASSWORD: "${EIOT_ADMIN_PASSWORD:-admin123}"
+      EIOT_EMQX_USER: "${EIOT_EMQX_USER:-eiot}"
+      EIOT_EMQX_PASS: "${EIOT_EMQX_PASS:-}"
     ports:
       - "8080:8080"
     depends_on:

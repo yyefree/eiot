@@ -42,11 +42,11 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
     final auth = context.read<AuthProvider>();
-    final code = await auth.sendCode(_phoneCtrl.text);
-    if (code != null) {
+    final ok = await auth.sendCode(_phoneCtrl.text);
+    if (ok) {
       _startCountdown();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('验证码: $code')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('验证码已发送，请注意查收')));
       }
     } else {
       if (mounted) {

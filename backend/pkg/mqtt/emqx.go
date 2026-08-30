@@ -94,7 +94,11 @@ func (e *EMQXClient) Publish(topic string, payload interface{}) error {
 	if e == nil || e.client == nil {
 		return nil
 	}
-	data, _ := json.Marshal(payload)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[EMQX] marshal payload failed: %v", err)
+		return err
+	}
 	token := e.client.Publish(topic, 1, false, data)
 	token.Wait()
 	if err := token.Error(); err != nil {

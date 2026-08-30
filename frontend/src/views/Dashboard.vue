@@ -79,7 +79,6 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components'
@@ -88,27 +87,51 @@ import request from '@/utils/request'
 
 echarts.use([LineChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer])
 
-const router = useRouter()
 const chartRef = ref(null)
 let chart = null
 
 const stats = ref({ devices: 0, online: 0, models: 0, products: 0 })
 const devices = ref([])
+const chartData = ref({ hours: [], values: [] })
 
-const genMockData = () => {
-  const hours = []
-  const values = []
-  for (let i = 23; i >= 0; i--) {
-    hours.push((24 - i - 1) + ':00')
-    values.push(Math.floor(Math.random() * 500 + 100))
+const loadData = async () => {
+  try {
+    const data = await request.get('/admin/stats')
+    if (data) {
+      stats.value.devices = data.devices || 0
+      stats.value.online = data.online || 0
+      stats.value.models = data.thingModels || 0
+      stats.value.products = data.products || 0
+      devices.value = data.devices_list || data.devices || []
+    }
+  } catch (e) {
+    console.error(e)
   }
-  return { hours, values }
+  try {
+    const dashData = await request.get('/dashboard', { params: { type: 'web' } })
+    if (dashData?.list?.[0]?.layout_json) {
+      const layout = JSON.parse(dashData.list[0].layout_json)
+      if (layout.chart_data) {
+        chartData.value = layout.chart_data
+      }
+    }
+  } catch (_) {}
 }
 
 const renderChart = () => {
   if (!chartRef.value) return
   chart = echarts.init(chartRef.value)
-  const { hours, values } = genMockData()
+  let hours = chartData.value.hours
+  let values = chartData.value.values
+  if (!hours.length || !values.length) {
+    // 无真实数据时展示空图表
+    hours = []
+    values = []
+    for (let i = 23; i >= 0; i--) {
+      hours.push((24 - i - 1) + ':00')
+      values.push(0)
+    }
+  }
   chart.setOption({
     tooltip: { trigger: 'axis' },
     grid: { left: 40, right: 20, top: 30, bottom: 40 },
@@ -125,28 +148,6 @@ const renderChart = () => {
       itemStyle: { color: '#409eff' }
     }]
   })
-}
-
-const loadData = async () => {
-  try {
-    const data = await request.get('/dashboard')
-    if (data) {
-      stats.value.devices = data.devices || 0
-      stats.value.online = data.online || 0
-      stats.value.models = data.thingModels || 0
-      stats.value.products = data.products || 0
-      devices.value = data.devices_list || data.devices_list || []
-    }
-  } catch (e) {
-    console.error(e)
-    devices.value = [
-      { id: 1, name: 'Demo-Device-01', productName: '智能温控器', online: true },
-      { id: 2, name: 'Demo-Device-02', productName: '智能门锁', online: false },
-      { id: 3, name: 'Demo-Device-03', productName: '环境监测', online: true },
-      { id: 4, name: 'Demo-Device-04', productName: '智能插座', online: true }
-    ]
-    stats.value = { devices: 48, online: 32, models: 12, products: 8 }
-  }
 }
 
 const handleResize = () => chart && chart.resize()
