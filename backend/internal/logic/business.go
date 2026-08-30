@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -21,7 +22,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// BizError 业务错误
+// BizError 业务错误（供 handler 识别并转为 HTTP 响应）
 type BizError struct {
 	HTTPCode int
 	Code     int
@@ -30,8 +31,109 @@ type BizError struct {
 
 func (e *BizError) Error() string { return e.Message }
 
-func NewBizError(httpCode, code int, msg string) *BizError {
-	return &BizError{HTTPCode: httpCode, Code: code, Message: msg}
+func NewBizError(httpCode, bizCode int, msg string) *BizError {
+	return &BizError{HTTPCode: httpCode, Code: bizCode, Message: msg}
+}
+
+// ========== 统一错误码常量 ==========
+const (
+	// 通用错误码
+	ErrCodeSuccess        = 0    // 成功
+	ErrCodeBadRequest     = 400  // 请求参数错误
+	ErrCodeUnauthorized   = 401  // 未认证/Token无效
+	ErrCodeForbidden      = 403  // 无权限
+	ErrCodeNotFound       = 404  // 资源不存在
+	ErrCodeConflict       = 409  // 资源冲突
+	ErrCodeInternal       = 500  // 服务器内部错误
+	ErrCodeServiceUnavail = 503  // 服务不可用
+
+	// 业务错误码 (10000+)
+	ErrCodeInvalidParams   = 10001 // 无效参数
+	ErrCodeUserNotExist    = 10002 // 用户不存在
+	ErrCodeUserDisabled    = 10003 // 用户已禁用
+	ErrCodeWrongPassword   = 10004 // 密码错误
+	ErrCodeTokenExpired    = 10005 // Token过期
+	ErrCodeTokenInvalid    = 10006 // Token无效
+	ErrCodeDeviceNotExist  = 10007 // 设备不存在
+	ErrCodeDeviceOffline   = 10008 // 设备离线
+	ErrCodeDeviceBindFail  = 10009 // 设备绑定失败
+	ErrCodeProductNotExist = 10010 // 产品不存在
+	ErrCodeThingModelError = 10011 // 物模型错误
+	ErrCodeRuleNotExist    = 10012 // 规则不存在
+	ErrCodeRuleConflict    = 10013 // 规则冲突
+	ErrCodeShadowConflict  = 10014 // 影子版本冲突
+	ErrCodeProvisionFail   = 10015 // 配网失败
+	ErrCodeGatewayNotExist = 10016 // 网关不存在
+	ErrCodeSubDeviceExist  = 10017 // 子设备已存在
+	ErrCodeDataFlowError   = 10018 // 数据流转错误
+	ErrCodeProtocolError   = 10019 // 协议网关错误
+	ErrCodeDiagnosticError = 10020 // 诊断错误
+
+	// 错误消息模板 (支持 i18n 占位符)
+	ErrMsgInvalidParams     = "无效参数: %s"
+	ErrMsgUserNotExist      = "用户不存在"
+	ErrMsgUserDisabled      = "账号已禁用"
+	ErrMsgWrongPassword     = "账号或密码错误"
+	ErrMsgTokenExpired      = "登录已过期，请重新登录"
+	ErrMsgTokenInvalid      = "无效的访问令牌"
+	ErrMsgDeviceNotExist    = "设备不存在: %s"
+	ErrMsgDeviceOffline     = "设备离线: %s"
+	ErrMsgProductNotExist   = "产品不存在"
+	ErrMsgThingModelInvalid = "物模型格式错误: %s"
+	ErrMsgRuleNotExist      = "规则不存在"
+	ErrMsgShadowConflict    = "影子版本冲突，请刷新后重试"
+	ErrMsgProvisionTimeout  = "配网超时: %s"
+	ErrMsgGatewayNotGateway = "该设备不是网关类型"
+	ErrMsgSubDeviceBinded   = "子设备已绑定到其他网关"
+	ErrMsgDataFlowInvalid   = "数据流转配置无效: %s"
+	ErrMsgProtocolNotSupport = "不支持的协议类型: %s"
+)
+
+// i18n 错误消息映射 (预留扩展)
+var errMsgZhCN = map[int]string{
+	ErrCodeSuccess:          "成功",
+	ErrCodeBadRequest:       "请求参数错误",
+	ErrCodeUnauthorized:     "未授权",
+	ErrCodeForbidden:        "无权限访问",
+	ErrCodeNotFound:         "资源不存在",
+	ErrCodeInternal:         "服务器内部错误",
+	ErrCodeInvalidParams:    "无效参数",
+	ErrCodeUserNotExist:     "用户不存在",
+	ErrCodeUserDisabled:     "账号已禁用",
+	ErrCodeWrongPassword:    "账号或密码错误",
+	ErrCodeTokenExpired:     "登录已过期，请重新登录",
+	ErrCodeTokenInvalid:     "无效的访问令牌",
+	ErrCodeDeviceNotExist:   "设备不存在",
+	ErrCodeDeviceOffline:    "设备离线",
+	ErrCodeDeviceBindFail:   "设备绑定失败",
+	ErrCodeProductNotExist:  "产品不存在",
+	ErrCodeThingModelError:  "物模型错误",
+	ErrCodeRuleNotExist:     "规则不存在",
+	ErrCodeRuleConflict:     "规则冲突",
+	ErrCodeShadowConflict:   "影子版本冲突",
+	ErrCodeProvisionFail:    "配网失败",
+	ErrCodeGatewayNotExist:  "网关不存在",
+	ErrCodeSubDeviceExist:   "子设备已存在",
+	ErrCodeDataFlowError:    "数据流转错误",
+	ErrCodeProtocolError:    "协议网关错误",
+	ErrCodeDiagnosticError:  "诊断错误",
+}
+
+// GetErrorMessage 获取错误消息 (支持 i18n 扩展)
+func GetErrorMessage(code int, lang string) string {
+	if lang == "en" {
+		// TODO: English messages
+	}
+	if msg, ok := errMsgZhCN[code]; ok {
+		return msg
+	}
+	return "未知错误"
+}
+
+// NewBizErrorWithCode 创建带错误码的业务错误
+func NewBizErrorWithCode(httpCode, bizCode int, format string, args ...interface{}) *BizError {
+	msg := fmt.Sprintf(GetErrorMessage(bizCode, "zh"), args...)
+	return &BizError{HTTPCode: httpCode, Code: bizCode, Message: msg}
 }
 
 // codeStore 保存验证码（内存存储，简化解法）
@@ -70,18 +172,18 @@ func init() {
 // LoginByPassword 账号密码登录
 func LoginByPassword(phone, password, secret string) (string, *model.User, error) {
 	if phone == "" || password == "" {
-		return "", nil, NewBizError(http.StatusBadRequest, 400, "账号或密码不能为空")
+		return "", nil, NewBizErrorWithCode(http.StatusBadRequest, ErrCodeInvalidParams, ErrMsgInvalidParams, "账号或密码不能为空")
 	}
 	var u model.User
 	if err := dao.DB.Where("phone = ? OR username = ?", phone, phone).First(&u).Error; err != nil {
-		return "", nil, NewBizError(http.StatusUnauthorized, 401, "账号或密码错误")
+		return "", nil, NewBizErrorWithCode(http.StatusUnauthorized, ErrCodeWrongPassword, ErrMsgWrongPassword)
 	}
 	if u.Status != 1 {
-		return "", nil, NewBizError(http.StatusForbidden, 403, "账号已禁用")
+		return "", nil, NewBizErrorWithCode(http.StatusForbidden, ErrCodeUserDisabled, ErrMsgUserDisabled)
 	}
 	// 仅使用 bcrypt 校验，禁止明文密码 fallback
 	if !util.CheckPassword(password, u.Password) {
-		return "", nil, NewBizError(http.StatusUnauthorized, 401, "账号或密码错误")
+		return "", nil, NewBizErrorWithCode(http.StatusUnauthorized, ErrCodeWrongPassword, ErrMsgWrongPassword)
 	}
 	token, err := util.GenerateJWT(u.ID, u.Role, secret)
 	return token, &u, err
@@ -696,7 +798,7 @@ func ControlDevice(uid uint, role string, id uint, params map[string]interface{}
 			}
 			_ = cli.Publish(topic, payload)
 			data, _ := json.Marshal(payload)
-			LogMqttMessage(d.DeviceSN, topic, "down", string(data))
+			LogMqttMessageAsync(d.DeviceSN, topic, "down", string(data))
 		}
 	}
 	// 记录日志
@@ -1532,7 +1634,7 @@ func GetDeviceShadow(deviceSN string) (*model.DeviceShadow, error) {
 	return &shadow, err
 }
 
-// UpdateDeviceShadowDesired 更新设备影子期望值
+// UpdateDeviceShadowDesired 更新设备影子期望值（乐观锁）
 func UpdateDeviceShadowDesired(deviceSN string, desired map[string]interface{}) error {
 	desiredJSON, _ := json.Marshal(desired)
 	var shadow model.DeviceShadow
@@ -1548,25 +1650,64 @@ func UpdateDeviceShadowDesired(deviceSN string, desired map[string]interface{}) 
 	}
 	shadow.DesiredJSON = string(desiredJSON)
 	shadow.Version++
-	return dao.DB.Save(&shadow).Error
+	// 乐观锁：version 必须匹配
+	result := dao.DB.Model(&model.DeviceShadow{}).
+		Where("device_sn = ? AND version = ?", deviceSN, shadow.Version-1).
+		Updates(map[string]interface{}{
+			"desired_json": string(desiredJSON),
+			"version":      shadow.Version,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return NewBizErrorWithCode(http.StatusConflict, ErrCodeShadowConflict, ErrMsgShadowConflict)
+	}
+	return nil
 }
 
-// SyncDeviceShadowReported 同步设备上报值到影子
-func SyncDeviceShadowReported(deviceSN string, reported map[string]interface{}) {
+// SyncDeviceShadowReported 同步设备上报值到影子（乐观锁）
+func SyncDeviceShadowReported(deviceSN string, reported map[string]interface{}) error {
 	reportedJSON, _ := json.Marshal(reported)
 	var shadow model.DeviceShadow
-	if err := dao.DB.Where("device_sn = ?", deviceSN).First(&shadow).Error; err != nil {
+	err := dao.DB.Where("device_sn = ?", deviceSN).First(&shadow).Error
+	if err == gorm.ErrRecordNotFound {
 		shadow = model.DeviceShadow{
 			DeviceSN:     deviceSN,
 			DesiredJSON:  "{}",
 			ReportedJSON: string(reportedJSON),
+			Version:      1,
 		}
-		dao.DB.Create(&shadow)
-		return
+		return dao.DB.Create(&shadow).Error
 	}
 	shadow.ReportedJSON = string(reportedJSON)
 	shadow.Version++
-	dao.DB.Save(&shadow)
+	// 乐观锁：version 必须匹配
+	result := dao.DB.Model(&model.DeviceShadow{}).
+		Where("device_sn = ? AND version = ?", deviceSN, shadow.Version-1).
+		Updates(map[string]interface{}{
+			"reported_json": string(reportedJSON),
+			"version":       shadow.Version,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		// 并发冲突，重试一次（读取最新版本重试）
+		var latest model.DeviceShadow
+		if dao.DB.Where("device_sn = ?", deviceSN).First(&latest).Error == nil {
+			latest.ReportedJSON = string(reportedJSON)
+			latest.Version++
+			return dao.DB.Model(&model.DeviceShadow{}).
+				Where("device_sn = ? AND version = ?", deviceSN, latest.Version-1).
+				Updates(map[string]interface{}{
+					"reported_json": string(reportedJSON),
+					"version":       latest.Version,
+				}).Error
+		}
+		return NewBizErrorWithCode(http.StatusConflict, ErrCodeShadowConflict, ErrMsgShadowConflict)
+	}
+	return nil
 }
 
 // ========== 物模型导入导出 ==========
@@ -1816,6 +1957,44 @@ func ToggleAlertRule(id uint, enabled bool) error {
 
 // ========== 规则引擎/场景联动 ==========
 
+// 规则缓存（并发安全）
+var (
+	ruleCache     []model.Rule
+	ruleCacheMu   sync.RWMutex
+	ruleCacheDirty = true
+)
+
+func invalidateRuleCache() {
+	ruleCacheMu.Lock()
+	ruleCacheDirty = true
+	ruleCacheMu.Unlock()
+}
+
+func getEnabledRules() []model.Rule {
+	ruleCacheMu.RLock()
+	if !ruleCacheDirty && len(ruleCache) > 0 {
+		rules := make([]model.Rule, len(ruleCache))
+		copy(rules, ruleCache)
+		ruleCacheMu.RUnlock()
+		return rules
+	}
+	ruleCacheMu.RUnlock()
+
+	// 缓存失效，重新加载
+	ruleCacheMu.Lock()
+	defer ruleCacheMu.Unlock()
+	if !ruleCacheDirty {
+		rules := make([]model.Rule, len(ruleCache))
+		copy(rules, ruleCache)
+		return rules
+	}
+	var rules []model.Rule
+	dao.DB.Where("enabled = ?", true).Find(&rules)
+	ruleCache = rules
+	ruleCacheDirty = false
+	return rules
+}
+
 // RuleTrigger 规则触发条件
 type RuleTrigger struct {
 	Type       string `json:"type"`       // device_property / device_event / timer / manual
@@ -1862,6 +2041,7 @@ func CreateRule(name, description, ruleType string, trigger RuleTrigger, actions
 	if err := dao.DB.Create(r).Error; err != nil {
 		return nil, err
 	}
+	invalidateRuleCache()
 	return r, nil
 }
 
@@ -1888,29 +2068,40 @@ func GetRule(id uint) (*model.Rule, error) {
 func UpdateRule(id uint, name, description string, trigger RuleTrigger, actions []RuleAction, enabled bool) error {
 	triggerJSON, _ := json.Marshal(trigger)
 	actionJSON, _ := json.Marshal(actions)
-	return dao.DB.Model(&model.Rule{}).Where("id = ?", id).Updates(map[string]interface{}{
+	err := dao.DB.Model(&model.Rule{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"name":         name,
 		"description":  description,
 		"trigger_json": string(triggerJSON),
 		"action_json":  string(actionJSON),
 		"enabled":      enabled,
 	}).Error
+	if err == nil {
+		invalidateRuleCache()
+	}
+	return err
 }
 
 // DeleteRule 删除规则
 func DeleteRule(id uint) error {
-	return dao.DB.Delete(&model.Rule{}, id).Error
+	err := dao.DB.Delete(&model.Rule{}, id).Error
+	if err == nil {
+		invalidateRuleCache()
+	}
+	return err
 }
 
 // ToggleRule 启用/禁用规则
 func ToggleRule(id uint, enabled bool) error {
-	return dao.DB.Model(&model.Rule{}).Where("id = ?", id).Update("enabled", enabled).Error
+	err := dao.DB.Model(&model.Rule{}).Where("id = ?", id).Update("enabled", enabled).Error
+	if err == nil {
+		invalidateRuleCache()
+	}
+	return err
 }
 
 // EvaluateRule 评估并执行规则
 func EvaluateRule(triggerData map[string]interface{}) {
-	var rules []model.Rule
-	dao.DB.Where("enabled = ?", true).Find(&rules)
+	rules := getEnabledRules()
 
 	for _, rule := range rules {
 		if matchTrigger(rule, triggerData) {
@@ -2224,7 +2415,97 @@ func SearchDevicesByTag(key, value string) ([]model.Device, error) {
 	return devices, err
 }
 
-// LogMqttMessage 记录 MQTT 报文
+// ========== MQTT 异步批量日志 ==========
+
+type mqttLogEntry struct {
+	DeviceSN  string
+	Topic     string
+	Direction string
+	Payload   string
+}
+
+var (
+	mqttLogChan   = make(chan mqttLogEntry, 10000)
+	mqttLogBatch  = make([]mqttLogEntry, 0, 100)
+	mqttLogTicker = time.NewTicker(500 * time.Millisecond)
+	mqttLogMu     sync.Mutex
+	mqttLogStop   = make(chan struct{})
+)
+
+func init() {
+	// 启动异步批量写入 goroutine
+	go func() {
+		for {
+			select {
+			case entry := <-mqttLogChan:
+				mqttLogMu.Lock()
+				mqttLogBatch = append(mqttLogBatch, entry)
+				if len(mqttLogBatch) >= 100 {
+					flushMqttLogBatchLocked()
+				}
+				mqttLogMu.Unlock()
+			case <-mqttLogTicker.C:
+				mqttLogMu.Lock()
+				if len(mqttLogBatch) > 0 {
+					flushMqttLogBatchLocked()
+				}
+				mqttLogMu.Unlock()
+			case <-mqttLogStop:
+				// 优雅关闭：刷新剩余
+				mqttLogMu.Lock()
+				flushMqttLogBatchLocked()
+				mqttLogMu.Unlock()
+				return
+			}
+		}
+	}()
+}
+
+func flushMqttLogBatchLocked() {
+	if len(mqttLogBatch) == 0 {
+		return
+	}
+	batch := make([]mqttLogEntry, len(mqttLogBatch))
+	copy(batch, mqttLogBatch)
+	mqttLogBatch = mqttLogBatch[:0]
+	mqttLogMu.Unlock()
+
+	// 批量插入
+	tx := dao.DB.Begin()
+	for _, e := range batch {
+		msg := &model.MqttMessage{
+			DeviceSN:  e.DeviceSN,
+			Topic:     e.Topic,
+			Direction: e.Direction,
+			Payload:   e.Payload,
+		}
+		if err := tx.Create(msg).Error; err != nil {
+			log.Printf("[MQTT Log] batch insert failed: %v", err)
+			tx.Rollback()
+			return
+		}
+	}
+	tx.Commit()
+	mqttLogMu.Lock()
+}
+
+// LogMqttMessageAsync 异步记录 MQTT 报文（推荐用于高频场景）
+func LogMqttMessageAsync(deviceSN, topic, direction, payload string) {
+	select {
+	case mqttLogChan <- mqttLogEntry{
+		DeviceSN:  deviceSN,
+		Topic:     topic,
+		Direction: direction,
+		Payload:   payload,
+	}:
+		// 入队成功
+	default:
+		// 通道满，降级同步写入
+		LogMqttMessage(deviceSN, topic, direction, payload)
+	}
+}
+
+// LogMqttMessage 同步记录 MQTT 报文（保留兼容）
 func LogMqttMessage(deviceSN, topic, direction, payload string) {
 	msg := &model.MqttMessage{
 		DeviceSN:  deviceSN,

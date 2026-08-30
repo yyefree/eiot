@@ -121,10 +121,10 @@ func main() {
 			if !ok {
 				params = body
 			}
-			// 查找设备 SN 并记录 MQTT 报文
+			// 查找设备 SN 并记录 MQTT 报文（异步）
 			var d model.Device
 			if err := dao.DB.Where("product_key = ? AND device_name = ?", productKey, deviceName).First(&d).Error; err == nil {
-				logic.LogMqttMessage(d.DeviceSN, topic, "up", string(payload))
+				logic.LogMqttMessageAsync(d.DeviceSN, topic, "up", string(payload))
 				logic.HandleDeviceReportByPKAndName(productKey, deviceName, params)
 			}
 		})
@@ -166,7 +166,7 @@ func main() {
 			if err := dao.DB.Where("product_key = ? AND device_name = ?", productKey, deviceName).First(&d).Error; err != nil {
 				return
 			}
-			logic.LogMqttMessage(d.DeviceSN, topic, "up", string(payload))
+			logic.LogMqttMessageAsync(d.DeviceSN, topic, "up", string(payload))
 			logic.ReportDeviceEvent(d.DeviceSN, eventId, eventName, string(output))
 		})
 
@@ -187,7 +187,7 @@ func main() {
 			if err := dao.DB.Where("product_key = ? AND device_name = ?", productKey, deviceName).First(&d).Error; err != nil {
 				return
 			}
-			logic.LogMqttMessage(d.DeviceSN, topic, "up", string(payload))
+			logic.LogMqttMessageAsync(d.DeviceSN, topic, "up", string(payload))
 			outputJSON, _ := json.Marshal(body["output"])
 			dao.DB.Model(&model.DeviceServiceHistory{}).
 				Where("device_sn = ? AND service_id = ? AND status = 'success'", d.DeviceSN, serviceId).

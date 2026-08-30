@@ -431,7 +431,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, onMounted, reactive, computed, nextTick, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
@@ -928,6 +928,15 @@ const toggleMqttAutoRefresh = (val) => {
     }
   }
 }
+
+// 监听调试标签页切换，离开 MQTT 标签页时停止自动刷新
+watch(debugActiveTab, (newTab) => {
+  if (newTab !== 'debug-mqtt' && mqttAutoRefreshTimer) {
+    clearInterval(mqttAutoRefreshTimer)
+    mqttAutoRefreshTimer = null
+    mqttAutoRefresh.value = false
+  }
+})
 
 // 加载调试日志
 const loadDebugLogs = async () => {

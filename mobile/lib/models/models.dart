@@ -1,3 +1,50 @@
+// Safe JSON parsing utilities
+class JsonUtils {
+  static String getString(dynamic v, [String def = '']) {
+    if (v == null) return def;
+    if (v is String) return v;
+    return v.toString();
+  }
+
+  static int getInt(dynamic v, [int def = 0]) {
+    if (v == null) return def;
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    if (v is String) return int.tryParse(v) ?? def;
+    return def;
+  }
+
+  static double getDouble(dynamic v, [double def = 0.0]) {
+    if (v == null) return def;
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? def;
+    return def;
+  }
+
+  static bool getBool(dynamic v, [bool def = false]) {
+    if (v == null) return def;
+    if (v is bool) return v;
+    if (v is String) return v.toLowerCase() == 'true' || v == '1';
+    if (v is int) return v != 0;
+    return def;
+  }
+
+  static List<String> getStringList(dynamic v) {
+    if (v == null) return [];
+    if (v is List) {
+      return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+    }
+    return [];
+  }
+
+  static Map<String, dynamic> getMap(dynamic v) {
+    if (v == null) return {};
+    if (v is Map<String, dynamic>) return v;
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return {};
+  }
+}
 class UserInfo {
   final int id;
   final String username;
@@ -17,12 +64,12 @@ class UserInfo {
 
   factory UserInfo.fromJson(Map<String, dynamic> json) {
     return UserInfo(
-      id: json['id'] as int? ?? 0,
-      username: json['username'] as String? ?? '',
-      phone: json['phone'] as String? ?? '',
-      nickname: json['nickname'] as String? ?? '',
-      role: json['role'] as String? ?? 'user',
-      status: json['status'] as int? ?? 1,
+      id: JsonUtils.getInt(json['id']),
+      username: JsonUtils.getString(json['username']),
+      phone: JsonUtils.getString(json['phone']),
+      nickname: JsonUtils.getString(json['nickname']),
+      role: JsonUtils.getString(json['role'], 'user'),
+      status: JsonUtils.getInt(json['status'], 1),
     );
   }
 
@@ -54,15 +101,15 @@ class DeviceItem {
 
   factory DeviceItem.fromJson(Map<String, dynamic> json) {
     return DeviceItem(
-      id: json['id'] as int? ?? 0,
-      name: json['name'] as String? ?? '',
-      deviceSn: json['device_sn'] as String? ?? '',
-      productId: json['product_id'] as int? ?? 0,
-      productKey: json['product_key'] as String? ?? '',
-      productName: json['productName'] as String? ?? '',
-      online: json['online'] as bool? ?? false,
-      createdAt: json['createdAt'] as String? ?? '',
-      roomId: json['room_id'] as int?,
+      id: JsonUtils.getInt(json['id']),
+      name: JsonUtils.getString(json['name']),
+      deviceSn: JsonUtils.getString(json['device_sn']),
+      productId: JsonUtils.getInt(json['product_id']),
+      productKey: JsonUtils.getString(json['product_key']),
+      productName: JsonUtils.getString(json['productName']),
+      online: JsonUtils.getBool(json['online']),
+      createdAt: JsonUtils.getString(json['createdAt']),
+      roomId: json['room_id'] == null ? null : JsonUtils.getInt(json['room_id']),
     );
   }
 }
@@ -84,26 +131,30 @@ class DeviceDetail {
 
   factory DeviceDetail.fromJson(Map<String, dynamic> json) {
     final props = <ThingProperty>[];
-    if (json['thingModel'] != null && json['thingModel']['properties'] is List) {
-      for (var p in json['thingModel']['properties']) {
-        props.add(ThingProperty.fromJson(p));
+    final tm = json['thingModel'];
+    if (tm is Map && tm['properties'] is List) {
+      for (var p in tm['properties']) {
+        if (p is Map<String, dynamic>) props.add(ThingProperty.fromJson(p));
+        else if (p is Map) props.add(ThingProperty.fromJson(Map<String, dynamic>.from(p)));
       }
     }
     final events = <ThingEvent>[];
-    if (json['thingModel'] != null && json['thingModel']['events'] is List) {
-      for (var e in json['thingModel']['events']) {
-        events.add(ThingEvent.fromJson(e));
+    if (tm is Map && tm['events'] is List) {
+      for (var e in tm['events']) {
+        if (e is Map<String, dynamic>) events.add(ThingEvent.fromJson(e));
+        else if (e is Map) events.add(ThingEvent.fromJson(Map<String, dynamic>.from(e)));
       }
     }
     final services = <ThingService>[];
-    if (json['thingModel'] != null && json['thingModel']['services'] is List) {
-      for (var s in json['thingModel']['services']) {
-        services.add(ThingService.fromJson(s));
+    if (tm is Map && tm['services'] is List) {
+      for (var s in tm['services']) {
+        if (s is Map<String, dynamic>) services.add(ThingService.fromJson(s));
+        else if (s is Map) services.add(ThingService.fromJson(Map<String, dynamic>.from(s)));
       }
     }
     return DeviceDetail(
-      device: DeviceItem.fromJson(json['device'] ?? {}),
-      latest: (json['latest'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v?.toString() ?? '')) ?? {},
+      device: DeviceItem.fromJson((json['device'] as Map?)?.cast<String, dynamic>() ?? {}),
+      latest: (json['latest'] as Map?)?.cast<String, String>() ?? {},
       properties: props,
       events: events,
       services: services,
@@ -138,39 +189,33 @@ class ThingProperty {
     this.enumValues,
   });
 
-  static double? _toDouble(dynamic v) {
-    if (v == null) return null;
-    if (v is num) return v.toDouble();
-    return double.tryParse(v.toString());
-  }
-
   factory ThingProperty.fromJson(Map<String, dynamic> json) {
     final dt = json['dataType'];
     String typeStr = 'string';
     Map<String, dynamic>? specs;
     if (dt is Map) {
-      typeStr = dt['type'] as String? ?? 'string';
+      typeStr = JsonUtils.getString(dt['type'], 'string');
       specs = dt['specs'] as Map<String, dynamic>?;
     } else if (dt is String) {
       typeStr = dt;
     }
     List<String>? enums;
     if (specs?['enumValues'] is List) {
-      enums = (specs!['enumValues'] as List).map((e) => e.toString()).toList();
+      enums = JsonUtils.getStringList(specs!['enumValues']);
     } else if (json['enumValues'] is List) {
-      enums = (json['enumValues'] as List).map((e) => e.toString()).toList();
+      enums = JsonUtils.getStringList(json['enumValues']);
     }
     return ThingProperty(
-      identifier: json['identifier'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      accessMode: json['accessMode'] as String? ?? 'rw',
+      identifier: JsonUtils.getString(json['identifier']),
+      name: JsonUtils.getString(json['name']),
+      accessMode: JsonUtils.getString(json['accessMode'], 'rw'),
       dataType: typeStr,
-      min: _toDouble(specs?['min']),
-      max: _toDouble(specs?['max']),
-      unit: specs?['unit'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      required: json['required'] as bool? ?? false,
-      step: _toDouble(specs?['step']),
+      min: JsonUtils.getDouble(specs?['min']),
+      max: JsonUtils.getDouble(specs?['max']),
+      unit: JsonUtils.getString(specs?['unit']),
+      description: JsonUtils.getString(json['description']),
+      required: JsonUtils.getBool(json['required']),
+      step: JsonUtils.getDouble(specs?['step']),
       enumValues: enums,
     );
   }

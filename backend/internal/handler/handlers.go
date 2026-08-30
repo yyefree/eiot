@@ -1721,7 +1721,7 @@ func handleInvokeDeviceService(c *gin.Context, sc *svc.ServiceContext) (interfac
 		}
 		data, _ := json.Marshal(payload)
 		sc.EMQX.Publish(topic, payload)
-		logic.LogMqttMessage(d.DeviceSN, topic, "down", string(data))
+		logic.LogMqttMessageAsync(d.DeviceSN, topic, "down", string(data))
 	}
 	return history, nil
 }
