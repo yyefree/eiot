@@ -37,7 +37,7 @@ class HomeProvider extends ChangeNotifier {
 
   Future<void> loadRooms() async {
     if (_currentHome == null) return;
-    final resp = await ApiClient.get('/home/${_currentHome!.id}/room');
+    final resp = await ApiClient.getRoomList(_currentHome!.id);
     if (resp.ok && resp.data != null) {
       final data = resp.data;
       final list = (data is Map<String, dynamic> ? data['list'] : data) as List?;
@@ -76,7 +76,7 @@ class HomeProvider extends ChangeNotifier {
 
   Future<bool> createRoom(String name, String icon) async {
     if (_currentHome == null) return false;
-    final resp = await ApiClient.post('/home/${_currentHome!.id}/room', {'name': name, 'icon': icon});
+    final resp = await ApiClient.createRoom(_currentHome!.id, {'name': name, 'icon': icon});
     if (resp.ok) {
       await loadRooms();
       return true;
@@ -86,7 +86,7 @@ class HomeProvider extends ChangeNotifier {
 
   Future<bool> updateRoom(int roomId, String name, String icon) async {
     if (_currentHome == null) return false;
-    final resp = await ApiClient.put('/home/${_currentHome!.id}/room/$roomId', {'name': name, 'icon': icon});
+    final resp = await ApiClient.updateRoom(_currentHome!.id, roomId, {'name': name, 'icon': icon});
     if (resp.ok) {
       await loadRooms();
       return true;
@@ -96,7 +96,7 @@ class HomeProvider extends ChangeNotifier {
 
   Future<bool> deleteRoom(int roomId) async {
     if (_currentHome == null) return false;
-    final resp = await ApiClient.delete('/home/${_currentHome!.id}/room/$roomId');
+    final resp = await ApiClient.deleteRoom(_currentHome!.id, roomId);
     if (resp.ok) {
       await loadRooms();
       return true;
@@ -106,7 +106,7 @@ class HomeProvider extends ChangeNotifier {
 
   Future<List<DeviceItem>> getRoomDevices(int roomId) async {
     if (_currentHome == null) return [];
-    final resp = await ApiClient.get('/home/${_currentHome!.id}/room/$roomId/device');
+    final resp = await ApiClient.getRoomDevices(_currentHome!.id, roomId);
     if (resp.ok && resp.data != null) {
       final data = resp.data;
       final list = (data is Map<String, dynamic> ? data['list'] : data) as List?;
@@ -117,13 +117,13 @@ class HomeProvider extends ChangeNotifier {
 
   Future<bool> addDeviceToRoom(int roomId, int deviceId) async {
     if (_currentHome == null) return false;
-    final resp = await ApiClient.post('/home/${_currentHome!.id}/room/$roomId/device', {'device_id': deviceId});
+    final resp = await ApiClient.addDeviceToRoom(_currentHome!.id, roomId, {'device_id': deviceId});
     return resp.ok;
   }
 
   Future<bool> removeDeviceFromRoom(int roomId, int deviceId) async {
     if (_currentHome == null) return false;
-    final resp = await ApiClient.delete('/home/${_currentHome!.id}/room/$roomId/device/$deviceId');
+    final resp = await ApiClient.removeDeviceFromRoom(_currentHome!.id, roomId, deviceId);
     return resp.ok;
   }
 }

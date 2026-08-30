@@ -144,6 +144,9 @@ func main() {
 	sc := svc.NewServiceContext(&c)
 	sc.EMQX = emqx
 
+	// 设置设备数据上报回调，广播到 WebSocket 客户端
+	logic.OnDeviceData = handler.BroadcastDeviceData
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())

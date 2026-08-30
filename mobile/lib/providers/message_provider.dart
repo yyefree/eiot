@@ -38,7 +38,7 @@ class MessageProvider extends ChangeNotifier {
   }
 
   Future<void> markAsRead(int id) async {
-    await ApiClient.post('/message/$id/read', {});
+    await ApiClient.markMessageRead(id);
     final idx = _messages.indexWhere((m) => m.id == id);
     if (idx >= 0) {
       _messages[idx] = Message(
@@ -55,7 +55,7 @@ class MessageProvider extends ChangeNotifier {
   }
 
   Future<void> markAllAsRead() async {
-    await ApiClient.post('/message/read-all', {});
+    await ApiClient.markAllMessagesRead();
     _messages = _messages.map((m) => Message(
       id: m.id,
       type: m.type,

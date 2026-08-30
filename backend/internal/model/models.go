@@ -215,3 +215,28 @@ type OTAFirmware struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+// DeviceDataHistory 设备属性历史数据
+type DeviceDataHistory struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	DeviceSN  string    `gorm:"size:64;index:idx_sn_ts" json:"device_sn"`
+	Property  string    `gorm:"size:64;index:idx_sn_prop_ts" json:"property"`
+	Value     string    `gorm:"size:255" json:"value"`
+	CreatedAt time.Time `gorm:"index:idx_sn_ts" json:"created_at"`
+}
+
+// AlertRule 告警规则
+type AlertRule struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	ProductID   uint      `gorm:"index" json:"product_id"`
+	DeviceSN    string    `gorm:"size:64;index" json:"device_sn"` // 为空表示产品级规则
+	Property    string    `gorm:"size:64" json:"property"`
+	Operator    string    `gorm:"size:8" json:"operator"` // >, <, ==, >=, <=, !=
+	Threshold   string    `gorm:"size:64" json:"threshold"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	NotifyType  string    `gorm:"size:16;default:message" json:"notify_type"` // message / webhook
+	NotifyURL   string    `gorm:"size:512" json:"notify_url"`
+	CreatedBy   uint      `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}

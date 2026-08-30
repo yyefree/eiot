@@ -95,16 +95,16 @@ const getCategoryLabel = (category) => {
 
 const loadMessages = async () => {
   try {
-    const data = await request.get('/admin/messages')
-    messages.value = data?.list || data || []
+    const data = await request.get('/message', { params: { page: 1, size: 100 } })
+    const list = data?.list || data || []
+    messages.value = list.map(m => ({
+      ...m,
+      category: m.type || 'system',
+      time: m.created_at || '-'
+    }))
   } catch (e) {
-    messages.value = [
-      { id: 1, title: '系统维护通知', content: '系统将于今晚 22:00-23:00 进行例行维护升级，期间部分功能可能暂时不可用。', category: 'system', read: false, time: '2026-08-30 14:30:00' },
-      { id: 2, title: '设备离线告警', content: '设备 dev_001 已离线超过30分钟，请检查网络连接。', category: 'alert', read: false, time: '2026-08-30 13:15:00' },
-      { id: 3, title: 'OTA升级完成', content: '固件 v2.1.0 已成功推送到 128 台设备，升级成功率 98.4%。', category: 'ota', read: true, time: '2026-08-30 11:00:00' },
-      { id: 4, title: '新用户注册', content: '用户 user02 已完成注册并加入项目"智能园区"。', category: 'operation', read: true, time: '2026-08-30 09:45:00' },
-      { id: 5, title: '产品创建成功', content: '产品"智能温控器"已创建成功，ProductKey: pk_123456。', category: 'operation', read: false, time: '2026-08-29 16:20:00' }
-    ]
+    console.error(e)
+    messages.value = []
   }
 }
 
@@ -112,14 +112,18 @@ const filterMessages = () => {
   page.value = 1
 }
 
-const readMessage = (msg) => {
+const readMessage = async (msg) => {
   msg.read = true
   detailMsg.value = msg
   detailVisible.value = true
+  try { await request.put('/message/' + msg.id + '/read', {}) } catch (e) { /* ignore */ }
 }
 
-const markAllRead = () => {
-  messages.value.forEach(m => m.read = true)
+const markAllRead = async () => {
+  try {
+    await request.put('/message/read-all', {})
+    messages.value.forEach(m => m.read = true)
+  } catch (e) { console.error(e) }
 }
 
 onMounted(() => { loadMessages() })

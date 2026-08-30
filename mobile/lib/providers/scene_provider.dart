@@ -14,7 +14,7 @@ class SceneProvider extends ChangeNotifier {
   Future<void> loadScenes() async {
     _loading = true;
     notifyListeners();
-    final resp = await ApiClient.get('/scene');
+    final resp = await ApiClient.getSceneList();
     if (resp.ok && resp.data != null) {
       final data = resp.data;
       final list = (data is Map<String, dynamic> ? data['list'] : data) as List?;
@@ -59,7 +59,7 @@ class SceneProvider extends ChangeNotifier {
   }
 
   Future<bool> toggleScene(int id, bool enabled) async {
-    final resp = await ApiClient.put('/scene/$id', {'enabled': enabled});
+    final resp = await ApiClient.toggleScene(id, enabled);
     if (resp.ok) {
       await loadScenes();
       return true;

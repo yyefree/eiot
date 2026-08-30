@@ -141,6 +141,7 @@ const chartRange = ref('24h')
 
 const stats = ref({ devices: 0, online: 0, products: 0, alerts: 0 })
 const logs = ref([])
+const pieChartData = ref([])
 
 const onlineRate = computed(() => {
   if (!stats.value.devices) return 0
@@ -155,19 +156,34 @@ const loadData = async () => {
       stats.value.online = data.online || 0
       stats.value.products = data.products || 0
       stats.value.alerts = data.alerts || 0
+      // Build pie chart from products list
+      if (data.devices_list && data.devices_list.length > 0) {
+        const productMap = {}
+        data.devices_list.forEach(d => {
+          const name = d.productName || '未分类'
+          productMap[name] = (productMap[name] || 0) + 1
+        })
+        pieChartData.value = Object.entries(productMap).map(([name, value]) => ({ value, name }))
+      }
     }
   } catch (e) {
     console.error(e)
   }
 
-  // Mock log data
-  logs.value = [
-    { time: '2026-08-30 14:32:15', user: 'admin', action: '创建产品', target: '智能温控器', success: true },
-    { time: '2026-08-30 13:18:42', user: 'admin', action: 'OTA推送', target: '固件 v2.1.0 → 128台设备', success: true },
-    { time: '2026-08-30 11:05:33', user: 'user01', action: '添加设备', target: 'SN:20260830001', success: true },
-    { time: '2026-08-30 09:22:10', user: 'admin', action: '删除项目', target: '旧测试项目', success: true },
-    { time: '2026-08-30 08:45:00', user: 'system', action: '设备离线', target: 'dev_001 连接超时', success: false }
-  ]
+  // Load operation logs
+  try {
+    const logData = await request.get('/admin/device', { params: { page: 1, size: 10 } })
+    // Use recent devices as activity log
+    logs.value = (logData?.list || []).slice(0, 5).map(d => ({
+      time: d.updatedAt || d.updated_at || '-',
+      user: d.ownerName || 'admin',
+      action: d.online ? '设备上线' : '设备离线',
+      target: d.name || d.deviceName,
+      success: true
+    }))
+  } catch (e) {
+    logs.value = []
+  }
 }
 
 const renderTrendChart = () => {
@@ -250,6 +266,10 @@ const renderPieChart = () => {
   if (!pieChartRef.value) return
   pieChart = echarts.init(pieChartRef.value)
 
+  const data = pieChartData.value.length > 0 ? pieChartData.value : [
+    { value: 1, name: '暂无数据' }
+  ]
+
   pieChart.setOption({
     tooltip: {
       trigger: 'item',
@@ -275,13 +295,7 @@ const renderPieChart = () => {
         emphasis: {
           label: { show: true, fontSize: 14, fontWeight: 'bold' }
         },
-        data: [
-          { value: 45, name: 'WiFi设备' },
-          { value: 28, name: '蓝牙设备' },
-          { value: 15, name: '蜂窝设备' },
-          { value: 8, name: '网关设备' },
-          { value: 4, name: '其他' }
-        ]
+        data: data
       }
     ]
   })

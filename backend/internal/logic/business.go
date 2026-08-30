@@ -25,6 +25,9 @@ type codeItem struct {
 	Until time.Time
 }
 
+// OnDeviceData 设备数据上报回调（由 handler 包设置，避免循环依赖）
+var OnDeviceData func(deviceSN string, data map[string]interface{})
+
 var (
 	codeMap = map[string]*codeItem{}
 	codeMu  sync.RWMutex
@@ -643,8 +646,15 @@ func HandleDeviceReportByPKAndName(productKey, deviceName string, params map[str
 	}
 	sn := d.DeviceSN
 	cache.SetOnline(sn, true, 300)
+	wsData := map[string]interface{}{}
 	for k, v := range params {
 		cache.SetLatest(sn, k, fmt.Sprintf("%v", v))
+		SaveDeviceData(sn, k, fmt.Sprintf("%v", v))
+		wsData[k] = v
+	}
+	// 广播到 WebSocket 客户端（通过回调避免循环依赖）
+	if OnDeviceData != nil {
+		OnDeviceData(sn, wsData)
 	}
 	now := time.Now()
 	updates := map[string]interface{}{"last_online": &now, "updated_at": now}
@@ -1290,4 +1300,124 @@ func PushOTA(firmwareID uint, emqx *mqtt.EMQXClient) error {
 // Ensure 利用 gorm.ErrRecordNotFound 的辅助判断（如需更精确的 not-found 语义）
 func ensureRecordNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+// ========== 设备历史数据 ==========
+
+// SaveDeviceData 保存设备上报数据到历史记录
+func SaveDeviceData(deviceSN, property, value string) {
+	h := model.DeviceDataHistory{
+		DeviceSN:  deviceSN,
+		Property:  property,
+		Value:     value,
+		CreatedAt: time.Now(),
+	}
+	dao.DB.Create(&h)
+}
+
+// GetDeviceDataHistory 查询设备属性历史数据
+func GetDeviceDataHistory(deviceSN, property string, startTime, endTime time.Time, limit int) ([]model.DeviceDataHistory, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	var list []model.DeviceDataHistory
+	q := dao.DB.Where("device_sn = ?", deviceSN)
+	if property != "" {
+		q = q.Where("property = ?", property)
+	}
+	if !startTime.IsZero() {
+		q = q.Where("created_at >= ?", startTime)
+	}
+	if !endTime.IsZero() {
+		q = q.Where("created_at <= ?", endTime)
+	}
+	err := q.Order("created_at desc").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+// ========== 管理员设备管理 ==========
+
+// UpdateAdminDevice 管理员更新设备
+func UpdateAdminDevice(id uint, name string, status int) error {
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if name != "" {
+		updates["device_name"] = name
+	}
+	if status >= 0 {
+		updates["status"] = status
+	}
+	return dao.DB.Model(&model.Device{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// DeleteAdminDevice 管理员删除设备
+func DeleteAdminDevice(id uint) error {
+	// 先删关联
+	dao.DB.Where("device_id = ?", id).Delete(&model.RoomDevice{})
+	dao.DB.Where("device_id = ?", id).Delete(&model.DeviceShare{})
+	dao.DB.Where("device_id = ?", id).Delete(&model.UserDeviceUI{})
+	return dao.DB.Delete(&model.Device{}, id).Error
+}
+
+// ========== 用户资料编辑 ==========
+
+// UpdateUserInfo 更新用户资料
+func UpdateUserInfo(uid uint, nickname, avatar, email string) error {
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if nickname != "" {
+		updates["nickname"] = nickname
+	}
+	if avatar != "" {
+		updates["avatar"] = avatar
+	}
+	if email != "" {
+		updates["email"] = email
+	}
+	return dao.DB.Model(&model.User{}).Where("id = ?", uid).Updates(updates).Error
+}
+
+// ========== 告警规则 ==========
+
+// CreateAlertRule 创建告警规则
+func CreateAlertRule(productID uint, deviceSN, property, operator, threshold, notifyType, notifyURL string, createdBy uint) (*model.AlertRule, error) {
+	if property == "" || operator == "" {
+		return nil, errors.New("属性和操作符不可为空")
+	}
+	r := &model.AlertRule{
+		ProductID:  productID,
+		DeviceSN:   deviceSN,
+		Property:   property,
+		Operator:   operator,
+		Threshold:  threshold,
+		Enabled:    true,
+		NotifyType: notifyType,
+		NotifyURL:  notifyURL,
+		CreatedBy:  createdBy,
+	}
+	if err := dao.DB.Create(r).Error; err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// ListAlertRules 告警规则列表
+func ListAlertRules(productID uint, page, size int) (int64, []model.AlertRule, error) {
+	var total int64
+	var list []model.AlertRule
+	q := dao.DB.Model(&model.AlertRule{})
+	if productID > 0 {
+		q = q.Where("product_id = ?", productID)
+	}
+	q.Count(&total)
+	err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return total, list, err
+}
+
+// DeleteAlertRule 删除告警规则
+func DeleteAlertRule(id uint) error {
+	return dao.DB.Delete(&model.AlertRule{}, id).Error
+}
+
+// ToggleAlertRule 启用/禁用告警规则
+func ToggleAlertRule(id uint, enabled bool) error {
+	return dao.DB.Model(&model.AlertRule{}).Where("id = ?", id).Update("enabled", enabled).Error
 }

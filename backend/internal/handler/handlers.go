@@ -142,6 +142,16 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 		api.POST("/auth/send-code", wrap(sc, handleSendCode))
 		api.POST("/auth/login-code", wrap(sc, handleLoginCode))
 		api.GET("/user/info", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUserInfo))
+		api.PUT("/user/info", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUpdateUserInfo))
+
+	// 健康检查
+	api.GET("/health", wrap(sc, handleHealthCheck))
+
+	// WebSocket 实时推送
+	r.GET("/ws", HandleWebSocket)
+
+		// 设备历史数据（用户）
+		api.GET("/device/data/:sn", middleware.AuthMiddleware(sc.Config), wrap(sc, handleDeviceDataHistory))
 
 		// 管理员模块
 		admin := api.Group("/admin", middleware.AuthMiddleware(sc.Config), middleware.AdminMiddleware())
@@ -171,6 +181,14 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 			admin.POST("/device/batch", wrap(sc, handleBatchDevice))
 			admin.GET("/device/export/:product_id", wrap(sc, handleExportDevice))
           admin.GET("/device", wrap(sc, handleListDevice))
+          admin.PUT("/device/:id", wrap(sc, handleUpdateAdminDevice))
+          admin.DELETE("/device/:id", wrap(sc, handleDeleteAdminDevice))
+
+			// 告警规则
+			admin.POST("/alert-rule", wrap(sc, handleCreateAlertRule))
+			admin.GET("/alert-rule", wrap(sc, handleListAlertRules))
+			admin.DELETE("/alert-rule/:id", wrap(sc, handleDeleteAlertRule))
+			admin.PUT("/alert-rule/:id/toggle", wrap(sc, handleToggleAlertRule))
 
 			// 用户
 			admin.GET("/user", wrap(sc, handleListUser))
@@ -1224,4 +1242,103 @@ func handleListFirmwares(c *gin.Context, sc *svc.ServiceContext) (interface{}, e
 func handlePushOTA(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	return nil, logic.PushOTA(uint(id), sc.EMQX)
+}
+
+// ========== 管理员设备管理 ==========
+
+func handleUpdateAdminDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	name := sVal(b["name"])
+	status := -1
+	if v, ok := b["status"].(float64); ok {
+		status = int(v)
+	}
+	return nil, logic.UpdateAdminDevice(uint(id), name, status)
+}
+
+func handleDeleteAdminDevice(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteAdminDevice(uint(id))
+}
+
+// ========== 设备历史数据 ==========
+
+func handleDeviceDataHistory(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	sn := c.Param("sn")
+	property := c.Query("property")
+	startStr := c.Query("start_time")
+	endStr := c.Query("end_time")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "500"))
+
+	var startTime, endTime time.Time
+	if startStr != "" {
+		startTime, _ = time.Parse("2006-01-02T15:04:05", startStr)
+	}
+	if endStr != "" {
+		endTime, _ = time.Parse("2006-01-02T15:04:05", endStr)
+	}
+
+	list, err := logic.GetDeviceDataHistory(sn, property, startTime, endTime, limit)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"list": list, "total": len(list)}, nil
+}
+
+// ========== 用户资料编辑 ==========
+
+func handleUpdateUserInfo(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	return nil, logic.UpdateUserInfo(middleware.UID(c), sVal(b["nickname"]), sVal(b["avatar"]), sVal(b["email"]))
+}
+
+// ========== 健康检查 ==========
+
+func handleHealthCheck(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	return gin.H{"status": "ok", "time": time.Now().Format("2006-01-02 15:04:05")}, nil
+}
+
+// ========== 告警规则 ==========
+
+func handleCreateAlertRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	productID := uint(b["product_id"].(float64))
+	return logic.CreateAlertRule(productID, sVal(b["device_sn"]), sVal(b["property"]),
+		sVal(b["operator"]), sVal(b["threshold"]), sVal(b["notify_type"]),
+		sVal(b["notify_url"]), middleware.UID(c))
+}
+
+func handleListAlertRules(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	page, size := pageSize(c)
+	productID, _ := strconv.Atoi(c.Query("product_id"))
+	total, list, err := logic.ListAlertRules(uint(productID), page, size)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"total": total, "list": list, "page": page, "size": size}, nil
+}
+
+func handleDeleteAlertRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return nil, logic.DeleteAlertRule(uint(id))
+}
+
+func handleToggleAlertRule(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	b, _ := bodyMap(c)
+	enabled := true
+	if v, ok := b["enabled"].(bool); ok {
+		enabled = v
+	}
+	return nil, logic.ToggleAlertRule(uint(id), enabled)
 }

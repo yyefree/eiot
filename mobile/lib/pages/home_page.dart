@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/home_provider.dart';
+import '../providers/scene_provider.dart';
 import '../api/api_client.dart';
 import '../models/models.dart';
 import 'device_detail_page.dart';
@@ -184,6 +185,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSceneShortcuts() {
+    final sceneProvider = context.watch<SceneProvider>();
+    final scenes = sceneProvider.manualScenes;
+
     return Container(
       color: Colors.white,
       margin: const EdgeInsets.only(top: 8),
@@ -193,46 +197,71 @@ class _HomePageState extends State<HomePage> {
         children: [
           const Text('场景快捷', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 80,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _sceneShortcutCard('回家模式', Icons.home, const Color(0xFF4CAF50)),
-                const SizedBox(width: 12),
-                _sceneShortcutCard('离家模式', Icons.exit_to_app, const Color(0xFFFF9800)),
-                const SizedBox(width: 12),
-                _sceneShortcutCard('睡眠模式', Icons.bedtime, const Color(0xFF9C27B0)),
-                const SizedBox(width: 12),
-                _sceneShortcutCard('起床模式', Icons.alarm, const Color(0xFF2196F3)),
-              ],
+          if (scenes.isEmpty)
+            const SizedBox(
+              height: 80,
+              child: Center(child: Text('暂无场景', style: TextStyle(color: Color(0xFF999999), fontSize: 13))),
+            )
+          else
+            SizedBox(
+              height: 80,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: scenes.length,
+                itemBuilder: (context, index) {
+                  final scene = scenes[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: _sceneShortcutCard(scene),
+                  );
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
   }
 
-  Widget _sceneShortcutCard(String name, IconData icon, Color color) {
+  Widget _sceneShortcutCard(Scene scene) {
     return GestureDetector(
-      onTap: () {},
+      onTap: () async {
+        final provider = context.read<SceneProvider>();
+        await provider.runScene(scene.id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('场景 "${scene.name}" 已执行'), duration: const Duration(seconds: 1)),
+          );
+        }
+      },
       child: Container(
         width: 120,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: const Color(0xFF007DFF).withOpacity(0.1),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 28),
+            Icon(_sceneIcon(scene.icon), color: const Color(0xFF007DFF), size: 28),
             const SizedBox(height: 8),
-            Text(name, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w500)),
+            Text(scene.name, style: const TextStyle(color: Color(0xFF007DFF), fontSize: 13, fontWeight: FontWeight.w500)),
           ],
         ),
       ),
     );
+  }
+
+  IconData _sceneIcon(String iconName) {
+    switch (iconName) {
+      case 'home': return Icons.home;
+      case 'exit': case 'logout': return Icons.exit_to_app;
+      case 'bedtime': return Icons.bedtime;
+      case 'alarm': return Icons.alarm;
+      case 'light': return Icons.lightbulb;
+      case 'security': return Icons.security;
+      default: return Icons.play_circle;
+    }
   }
 
   Widget _buildDeviceCard(DeviceItem device) {

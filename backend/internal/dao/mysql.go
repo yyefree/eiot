@@ -52,6 +52,8 @@ func InitMySQL(cfg config.MySQLConf) error {
 		&model.SceneAction{},
 		&model.Message{},
 		&model.OTAFirmware{},
+		&model.DeviceDataHistory{},
+		&model.AlertRule{},
 	)
 	if err != nil {
 		log.Printf("[MySQL] migrate warning: %v", err)

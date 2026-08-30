@@ -11,28 +11,28 @@
     <!-- Firmware List -->
     <el-table :data="list" stripe style="width: 100%">
       <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="name" label="固件名称" min-width="160">
+      <el-table-column prop="version" label="版本号" width="140">
         <template #default="{ row }">
           <div class="firmware-name">
             <el-icon class="firmware-icon"><Document /></el-icon>
-            {{ row.name }}
+            {{ row.version }}
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="version" label="版本号" width="120" />
       <el-table-column label="产品" width="140">
         <template #default="{ row }">{{ row.product_name || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="file_size" label="文件大小" width="100">
-        <template #default="{ row }">{{ formatSize(row.file_size) }}</template>
+      <el-table-column prop="size" label="文件大小" width="100">
+        <template #default="{ row }">{{ formatSize(row.size) }}</template>
       </el-table-column>
+      <el-table-column prop="changelog" label="更新说明" min-width="180" show-overflow-tooltip />
       <el-table-column label="创建时间" width="160">
         <template #default="{ row }">{{ row.created_at || '-' }}</template>
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-            {{ row.status === 'active' ? '已发布' : '草稿' }}
+          <el-tag :type="row.status === 'done' ? 'success' : row.status === 'pushing' ? 'warning' : 'info'" size="small">
+            {{ row.status === 'done' ? '已完成' : row.status === 'pushing' ? '推送中' : '待推送' }}
           </el-tag>
         </template>
       </el-table-column>
@@ -60,9 +60,6 @@
     <!-- Upload Firmware Dialog -->
     <el-dialog v-model="uploadVisible" title="上传固件" width="520px" destroy-on-close>
       <el-form :model="uploadForm" label-width="100px" size="default">
-        <el-form-item label="固件名称" required>
-          <el-input v-model="uploadForm.name" placeholder="请输入固件名称" />
-        </el-form-item>
         <el-form-item label="版本号" required>
           <el-input v-model="uploadForm.version" placeholder="如 v1.0.0" />
         </el-form-item>
@@ -71,22 +68,14 @@
             <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="固件文件">
-          <el-upload
-            ref="uploadRef"
-            :auto-upload="false"
-            :limit="1"
-            :on-change="handleFileChange"
-            accept=".bin,.hex,.zip"
-          >
-            <el-button type="primary" :icon="Upload">选择文件</el-button>
-            <template #tip>
-              <div class="el-upload__tip">支持 .bin, .hex, .zip 格式</div>
-            </template>
-          </el-upload>
+        <el-form-item label="文件地址">
+          <el-input v-model="uploadForm.file_url" placeholder="固件下载URL（可选）" />
         </el-form-item>
-        <el-form-item label="升级说明">
-          <el-input v-model="uploadForm.description" type="textarea" :rows="3" placeholder="本次更新内容说明" />
+        <el-form-item label="文件大小">
+          <el-input-number v-model="uploadForm.size" :min="0" :step="1024" />
+        </el-form-item>
+        <el-form-item label="更新说明">
+          <el-input v-model="uploadForm.changelog" type="textarea" :rows="3" placeholder="本次更新内容说明" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -127,12 +116,12 @@
     <!-- Detail Dialog -->
     <el-dialog v-model="detailVisible" title="固件详情" width="520px">
       <el-descriptions :column="1" border size="small">
-        <el-descriptions-item label="固件名称">{{ detailData.name }}</el-descriptions-item>
         <el-descriptions-item label="版本号">{{ detailData.version }}</el-descriptions-item>
         <el-descriptions-item label="目标产品">{{ detailData.product_name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="文件大小">{{ formatSize(detailData.file_size) }}</el-descriptions-item>
+        <el-descriptions-item label="文件大小">{{ formatSize(detailData.size) }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ detailData.status }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ detailData.created_at || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="升级说明">{{ detailData.description || '无' }}</el-descriptions-item>
+        <el-descriptions-item label="更新说明">{{ detailData.changelog || '无' }}</el-descriptions-item>
       </el-descriptions>
       <template #footer>
         <el-button @click="detailVisible = false">关闭</el-button>
@@ -155,7 +144,7 @@ const products = ref([])
 const filterProduct = ref(null)
 
 const uploadVisible = ref(false)
-const uploadForm = ref({ name: '', version: '', product_id: null, description: '' })
+const uploadForm = ref({ version: '', product_id: null, file_url: '', size: 0, changelog: '' })
 const uploadFile = ref(null)
 const uploading = ref(false)
 
@@ -200,22 +189,22 @@ const handleFileChange = (file) => {
 }
 
 const submitUpload = async () => {
-  if (!uploadForm.value.name) { ElMessage.warning('请输入固件名称'); return }
   if (!uploadForm.value.version) { ElMessage.warning('请输入版本号'); return }
+  if (!uploadForm.value.product_id) { ElMessage.warning('请选择目标产品'); return }
   uploading.value = true
   try {
-    const formData = new FormData()
-    formData.append('name', uploadForm.value.name)
-    formData.append('version', uploadForm.value.version)
-    formData.append('product_id', uploadForm.value.product_id || '')
-    formData.append('description', uploadForm.value.description)
-    if (uploadFile.value) formData.append('file', uploadFile.value)
-    await request.post('/admin/ota', formData)
-    ElMessage.success('上传成功')
+    await request.post('/admin/ota', {
+      product_id: uploadForm.value.product_id,
+      version: uploadForm.value.version,
+      changelog: uploadForm.value.changelog,
+      file_url: uploadForm.value.file_url,
+      size: uploadForm.value.size || 0
+    })
+    ElMessage.success('创建成功')
     uploadVisible.value = false
     load()
   } catch (e) {
-    ElMessage.error('上传失败: ' + (e.message || '未知错误'))
+    ElMessage.error('创建失败: ' + (e.message || '未知错误'))
   } finally {
     uploading.value = false
   }
@@ -250,7 +239,7 @@ const viewDetail = (row) => {
 
 const remove = async (row) => {
   try {
-    await ElMessageBox.confirm('确认删除固件 "' + row.name + '"？', '提示', { type: 'warning' })
+    await ElMessageBox.confirm('确认删除固件 v' + row.version + '？', '提示', { type: 'warning' })
     await request.delete('/admin/ota/' + row.id)
     ElMessage.success('已删除')
     load()

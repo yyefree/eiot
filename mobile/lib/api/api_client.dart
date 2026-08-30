@@ -106,27 +106,35 @@ class ApiClient {
   static Future<ApiResponse> updateHome(int id, Map<String, dynamic> body) => put('/home/$id', body);
   static Future<ApiResponse> deleteHome(int id) => delete('/home/$id');
 
-  static Future<ApiResponse> getRoomList(int homeId) => get('/home/$homeId/room');
-  static Future<ApiResponse> createRoom(int homeId, Map<String, dynamic> body) => post('/home/$homeId/room', body);
-  static Future<ApiResponse> updateRoom(int homeId, int roomId, Map<String, dynamic> body) => put('/home/$homeId/room/$roomId', body);
-  static Future<ApiResponse> deleteRoom(int homeId, int roomId) => delete('/home/$homeId/room/$roomId');
+  static Future<ApiResponse> getRoomList(int homeId) => get('/room', params: {'home_id': homeId});
+  static Future<ApiResponse> createRoom(int homeId, Map<String, dynamic> body) => post('/room', {...body, 'home_id': homeId});
+  static Future<ApiResponse> updateRoom(int homeId, int roomId, Map<String, dynamic> body) => put('/room/$roomId', body);
+  static Future<ApiResponse> deleteRoom(int homeId, int roomId) => delete('/room/$roomId');
 
-  static Future<ApiResponse> getRoomDevices(int homeId, int roomId) => get('/home/$homeId/room/$roomId/device');
-  static Future<ApiResponse> addDeviceToRoom(int homeId, int roomId, Map<String, dynamic> body) => post('/home/$homeId/room/$roomId/device', body);
-  static Future<ApiResponse> removeDeviceFromRoom(int homeId, int roomId, int deviceId) => delete('/home/$homeId/room/$roomId/device/$deviceId');
+  static Future<ApiResponse> getRoomDevices(int homeId, int roomId) => get('/room/$roomId/device');
+  static Future<ApiResponse> addDeviceToRoom(int homeId, int roomId, Map<String, dynamic> body) => post('/room/$roomId/device', body);
+  static Future<ApiResponse> removeDeviceFromRoom(int homeId, int roomId, int deviceId) => delete('/room/$roomId/device/$deviceId');
 
-  static Future<ApiResponse> getSceneList() => get('/scene');
+  static Future<ApiResponse> getSceneList({int? homeId}) => get('/scene', params: homeId != null ? {'home_id': homeId} : null);
   static Future<ApiResponse> createScene(Map<String, dynamic> body) => post('/scene', body);
   static Future<ApiResponse> updateScene(int id, Map<String, dynamic> body) => put('/scene/$id', body);
   static Future<ApiResponse> deleteScene(int id) => delete('/scene/$id');
   static Future<ApiResponse> runScene(int id) => post('/scene/$id/run', {});
-  static Future<ApiResponse> toggleScene(int id, bool enabled) => put('/scene/$id', {'enabled': enabled});
+  static Future<ApiResponse> toggleScene(int id, bool enabled) => put('/scene/$id/toggle', {'enabled': enabled});
 
   static Future<ApiResponse> getMessageList({int page = 1, int size = 50}) => get('/message', params: {'page': page, 'size': size});
-  static Future<ApiResponse> markMessageRead(int id) => post('/message/$id/read', {});
-  static Future<ApiResponse> markAllMessagesRead() => post('/message/read-all', {});
+  static Future<ApiResponse> markMessageRead(int id) => put('/message/$id/read', {});
+  static Future<ApiResponse> markAllMessagesRead() => put('/message/read-all', {});
   static Future<ApiResponse> deleteMessage(int id) => delete('/message/$id');
 
   static Future<ApiResponse> getOTAFirmwareList() => get('/admin/ota');
   static Future<ApiResponse> getOTAFirmwareDetail(int id) => get('/admin/ota/$id');
+
+  static Future<ApiResponse> getUserInfo() => get('/user/info');
+  static Future<ApiResponse> updateUserInfo(Map<String, dynamic> body) => put('/user/info', body);
+
+  static Future<ApiResponse> getDeviceDataHistory(String deviceSn, {String? property, int limit = 100}) =>
+      get('/device/data/$deviceSn', params: { if (property != null) 'property': property, 'limit': limit });
+
+  static Future<ApiResponse> healthCheck() => get('/health');
 }
