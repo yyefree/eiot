@@ -405,7 +405,7 @@ func handleGetProduct(c *gin.Context, sc *svc.ServiceContext) (interface{}, erro
 		"events_json":     p.EventsJSON,
 		"services_json":   p.ServicesJSON,
 		"mobile_ui_json": p.MobileUIJSON,
-		"has_devices":    devCount,
+		"has_devices":    devCount > 0,
 		"created_at":    p.CreatedAt.Format("2006-01-02 15:04:05"),
 	}, nil
 }

@@ -1,4 +1,3 @@
-// 用户模型
 class UserInfo {
   final int id;
   final String username;
@@ -30,12 +29,10 @@ class UserInfo {
   bool get isAdmin => role == 'admin';
 }
 
-// 设备模型
 class DeviceItem {
   final int id;
   final String name;
   final String deviceSn;
-  final String deviceKey;
   final int productId;
   final String productKey;
   final String productName;
@@ -46,7 +43,6 @@ class DeviceItem {
     required this.id,
     this.name = '',
     this.deviceSn = '',
-    this.deviceKey = '',
     this.productId = 0,
     this.productKey = '',
     this.productName = '',
@@ -59,7 +55,6 @@ class DeviceItem {
       id: json['id'] as int? ?? 0,
       name: json['name'] as String? ?? '',
       deviceSn: json['device_sn'] as String? ?? '',
-      deviceKey: json['deviceKey'] as String? ?? '',
       productId: json['product_id'] as int? ?? 0,
       productKey: json['product_key'] as String? ?? '',
       productName: json['productName'] as String? ?? '',
@@ -69,7 +64,6 @@ class DeviceItem {
   }
 }
 
-// 设备详情
 class DeviceDetail {
   final DeviceItem device;
   final Map<String, String> latest;
@@ -82,7 +76,6 @@ class DeviceDetail {
   });
 }
 
-// 物模型属性
 class ThingProperty {
   final String identifier;
   final String name;
@@ -102,6 +95,12 @@ class ThingProperty {
     this.unit = '',
   });
 
+  static double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
+
   factory ThingProperty.fromJson(Map<String, dynamic> json) {
     final dt = json['dataType'];
     String typeStr = 'string';
@@ -117,8 +116,8 @@ class ThingProperty {
       name: json['name'] as String? ?? '',
       accessMode: json['accessMode'] as String? ?? 'rw',
       dataType: typeStr,
-      min: specs?['min']?.toDouble(),
-      max: specs?['max']?.toDouble(),
+      min: _toDouble(specs?['min']),
+      max: _toDouble(specs?['max']),
       unit: specs?['unit'] as String? ?? '',
     );
   }

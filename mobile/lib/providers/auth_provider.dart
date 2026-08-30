@@ -13,67 +13,87 @@ class AuthProvider extends ChangeNotifier {
   bool get initialized => _initialized;
 
   Future<void> init() async {
-    await ApiClient.init();
-    if (ApiClient.token != null) {
-      await loadUser();
-    }
+    try {
+      await ApiClient.init();
+      if (ApiClient.token != null) {
+        await loadUser();
+      }
+    } catch (_) {}
     _initialized = true;
     notifyListeners();
   }
 
   Future<void> loadUser() async {
-    final resp = await ApiClient.get('/user/info');
-    if (resp.ok && resp.data != null) {
-      _user = UserInfo.fromJson(resp.data as Map<String, dynamic>);
-      notifyListeners();
-    }
+    try {
+      final resp = await ApiClient.get('/user/info');
+      if (resp.ok && resp.data != null && resp.data is Map<String, dynamic>) {
+        _user = UserInfo.fromJson(resp.data as Map<String, dynamic>);
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<bool> login(String phone, String password) async {
     _loading = true;
     notifyListeners();
-    final resp = await ApiClient.post('/auth/login', {'phone': phone, 'password': password});
-    _loading = false;
-    if (resp.ok && resp.data != null) {
-      final data = resp.data as Map<String, dynamic>;
-      final token = data['token'] as String?;
-      if (token != null) {
-        await ApiClient.saveToken(token);
-      }
-      if (data['user'] != null) {
-        _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+    try {
+      final resp = await ApiClient.post('/auth/login', {'phone': phone, 'password': password});
+      _loading = false;
+      if (resp.ok && resp.data != null && resp.data is Map<String, dynamic>) {
+        final data = resp.data as Map<String, dynamic>;
+        final token = data['token'] as String?;
+        if (token != null) {
+          await ApiClient.saveToken(token);
+        }
+        if (data['user'] is Map<String, dynamic>) {
+          _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+        }
+        notifyListeners();
+        return true;
       }
       notifyListeners();
-      return true;
+      return false;
+    } catch (_) {
+      _loading = false;
+      notifyListeners();
+      return false;
     }
-    notifyListeners();
-    return false;
   }
 
   Future<bool> sendCode(String phone) async {
-    final resp = await ApiClient.post('/auth/send-code', {'phone': phone});
-    return resp.ok;
+    try {
+      final resp = await ApiClient.post('/auth/send-code', {'phone': phone});
+      return resp.ok;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<bool> loginByCode(String phone, String code) async {
     _loading = true;
     notifyListeners();
-    final resp = await ApiClient.post('/auth/login-code', {'phone': phone, 'code': code});
-    _loading = false;
-    if (resp.ok && resp.data != null) {
-      final data = resp.data as Map<String, dynamic>;
-      final token = data['token'] as String?;
-      if (token != null) {
-        await ApiClient.saveToken(token);
-      }
-      if (data['user'] != null) {
-        _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+    try {
+      final resp = await ApiClient.post('/auth/login-code', {'phone': phone, 'code': code});
+      _loading = false;
+      if (resp.ok && resp.data != null && resp.data is Map<String, dynamic>) {
+        final data = resp.data as Map<String, dynamic>;
+        final token = data['token'] as String?;
+        if (token != null) {
+          await ApiClient.saveToken(token);
+        }
+        if (data['user'] is Map<String, dynamic>) {
+          _user = UserInfo.fromJson(data['user'] as Map<String, dynamic>);
+        }
+        notifyListeners();
+        return true;
       }
       notifyListeners();
-      return true;
+      return false;
+    } catch (_) {
+      _loading = false;
+      notifyListeners();
+      return false;
     }
-    notifyListeners();
-    return false;
   }
 
   Future<void> logout() async {

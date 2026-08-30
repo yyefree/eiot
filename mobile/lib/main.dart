@@ -47,7 +47,6 @@ class _RootState extends State<_Root> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    // 等待初始化完成
     if (!auth.initialized) {
       return const Scaffold(
         body: Center(
@@ -64,16 +63,16 @@ class _RootState extends State<_Root> {
         ),
       );
     }
-    // 根据登录状态导航
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_navigated) {
-        _navigated = true;
+    if (!_navigated) {
+      _navigated = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         Navigator.pushReplacementNamed(
           context,
           auth.isLoggedIn ? '/home' : '/login',
         );
-      }
-    });
+      });
+    }
     return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }
@@ -99,6 +98,7 @@ class _MainShellState extends State<_MainShell> {
     final auth = context.watch<AuthProvider>();
     if (!auth.isLoggedIn) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         Navigator.pushReplacementNamed(context, '/login');
       });
     }

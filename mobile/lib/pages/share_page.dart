@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
-import '../models/models.dart';
 
 class SharePage extends StatefulWidget {
   const SharePage({super.key});
@@ -20,8 +19,10 @@ class _SharePageState extends State<SharePage> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     final resp = await ApiClient.get('/device/share', params: {'page': 1, 'size': 50});
+    if (!mounted) return;
     if (resp.ok && resp.data != null) {
       final data = resp.data as Map<String, dynamic>;
       _shares = data['list'] as List? ?? [];
@@ -31,12 +32,11 @@ class _SharePageState extends State<SharePage> {
 
   Future<void> _revoke(int id) async {
     final resp = await ApiClient.delete('/device/share/$id');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(resp.ok ? '已撤销共享' : '操作失败: ${resp.msg}')),
-      );
-      if (resp.ok) _load();
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(resp.ok ? '已撤销共享' : '操作失败: ${resp.msg}')),
+    );
+    if (resp.ok) _load();
   }
 
   @override
@@ -54,19 +54,23 @@ class _SharePageState extends State<SharePage> {
                   padding: const EdgeInsets.all(12),
                   itemCount: _shares.length,
                   itemBuilder: (ctx, i) {
-                    final s = _shares[i] as Map<String, dynamic>;
+                    final s = _shares[i];
+                    if (s is! Map<String, dynamic>) return const SizedBox.shrink();
+                    final id = s['id'];
                     return Card(
                       child: ListTile(
                         leading: const Icon(Icons.share, color: Colors.blue),
                         title: Text('设备 #${s['device_id'] ?? '-'}'),
                         subtitle: Text('共享给用户 #${s['share_user_id'] ?? '-'}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.red),
-                          onPressed: () {
-                            final id = s['id'];
-                            if (id != null) _revoke(id as int);
-                          },
-                        ),
+                        trailing: id != null
+                            ? IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                onPressed: () {
+                                  final shareId = id is int ? id : int.tryParse('$id');
+                                  if (shareId != null) _revoke(shareId);
+                                },
+                              )
+                            : null,
                       ),
                     );
                   },

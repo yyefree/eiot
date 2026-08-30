@@ -39,14 +39,20 @@ class _DeviceListPageState extends State<DeviceListPage> {
   }
 
   Future<void> _load({bool more = false}) async {
+    if (!mounted) return;
     if (!more) {
       _page = 1;
       setState(() => _loading = true);
     }
     final resp = await ApiClient.get('/device', params: {'page': _page, 'size': 20});
+    if (!mounted) return;
     if (resp.ok && resp.data != null) {
       final data = resp.data as Map<String, dynamic>;
-      final list = (data['list'] as List?)?.map((e) => DeviceItem.fromJson(e as Map<String, dynamic>)).toList() ?? [];
+      final list = (data['list'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => DeviceItem.fromJson(e))
+              .toList() ??
+          [];
       _total = data['total'] as int? ?? 0;
       setState(() {
         if (more) {
@@ -99,9 +105,9 @@ class _DeviceListPageState extends State<DeviceListPage> {
                           backgroundColor: d.online ? Colors.green.shade50 : Colors.grey.shade100,
                         ),
                         onTap: () async {
-                          await Navigator.push(ctx,
+                          await Navigator.push(context,
                               MaterialPageRoute(builder: (_) => DeviceDetailPage(deviceId: d.id)));
-                          _load();
+                          if (mounted) _load();
                         },
                       ),
                     );
