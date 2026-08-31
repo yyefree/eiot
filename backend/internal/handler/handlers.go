@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -290,6 +291,7 @@ func RegisterHandlers(r *gin.Engine, sc *svc.ServiceContext) {
 		api.POST("/device/:id/event", middleware.AuthMiddleware(sc.Config), wrap(sc, handleReportDeviceEvent))
 		api.GET("/device/:id/event", middleware.AuthMiddleware(sc.Config), wrap(sc, handleListDeviceEvents))
 		api.POST("/device/:id/service", middleware.AuthMiddleware(sc.Config), wrap(sc, handleInvokeDeviceService))
+		api.POST("/device/:id/service/rrpc", middleware.AuthMiddleware(sc.Config), wrap(sc, handleInvokeDeviceServiceRRPC))
 		api.GET("/device/:id/service", middleware.AuthMiddleware(sc.Config), wrap(sc, handleListDeviceServices))
 		api.GET("/device/:id/shadow", middleware.AuthMiddleware(sc.Config), wrap(sc, handleGetDeviceShadow))
 		api.PUT("/device/:id/shadow", middleware.AuthMiddleware(sc.Config), wrap(sc, handleUpdateDeviceShadow))
@@ -1724,6 +1726,75 @@ func handleInvokeDeviceService(c *gin.Context, sc *svc.ServiceContext) (interfac
 		logic.LogMqttMessageAsync(d.DeviceSN, topic, "down", string(data))
 	}
 	return history, nil
+}
+
+// handleInvokeDeviceServiceRRPC 通过 RRPC 同步调用设备服务
+func handleInvokeDeviceServiceRRPC(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
+	b, err := bodyMap(c)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := strconv.Atoi(c.Param("id"))
+	var d model.Device
+	if err := dao.DB.First(&d, id).Error; err != nil {
+		return nil, errors.New("设备不存在")
+	}
+	inputJSON := "{}"
+	if v, ok := b["input"]; ok {
+		ib, _ := json.Marshal(v)
+		inputJSON = string(ib)
+	}
+	serviceID := sVal(b["service_id"])
+	serviceName := sVal(b["service_name"])
+	timeoutSec := iVal(b["timeout_sec"], 30)
+
+	// 生成消息 ID
+	messageId := fmt.Sprintf("rrpc_%d_%d", time.Now().UnixNano(), rand.Intn(10000))
+
+	// 创建历史记录
+	history := model.DeviceServiceHistory{
+		DeviceSN:    d.DeviceSN,
+		ServiceID:   serviceID,
+		ServiceName: serviceName,
+		InputJSON:   inputJSON,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+	}
+	if err := dao.DB.Create(&history).Error; err != nil {
+		return nil, err
+	}
+
+	// 构造 RRPC 请求
+	request := map[string]interface{}{
+		"id":      messageId,
+		"version": "1.0",
+		"method":  serviceID,
+		"params":  json.RawMessage(inputJSON),
+	}
+
+	// 发布 RRPC 请求
+	topic := fmt.Sprintf("/sys/%s/%s/rrpc/request/%s", d.ProductKey, d.DeviceName, messageId)
+	if sc.EMQX != nil {
+		sc.EMQX.Publish(topic, request)
+		data, _ := json.Marshal(request)
+		logic.LogMqttMessageAsync(d.DeviceSN, topic, "down", string(data))
+	}
+
+	// 等待响应（轮询数据库查询结果）
+	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
+	for time.Now().Before(deadline) {
+		var updated model.DeviceServiceHistory
+		if err := dao.DB.Where("id = ?", history.ID).First(&updated).Error; err == nil {
+			if updated.Status != "pending" {
+				return updated, nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// 超时标记失败
+	dao.DB.Model(&history).Update("status", "timeout")
+	return history, errors.New("RRPC 调用超时")
 }
 
 func handleListDeviceServices(c *gin.Context, sc *svc.ServiceContext) (interface{}, error) {
