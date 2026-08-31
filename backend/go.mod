@@ -3,16 +3,6 @@ module eiot
 go 1.24
 
 require (
-	eiot/internal/dao v0.0.0
-	eiot/internal/handler v0.0.0
-	eiot/internal/logic v0.0.0
-	eiot/internal/model v0.0.0
-	eiot/internal/svc v0.0.0
-	eiot/pkg/cache v0.0.0
-	eiot/pkg/config v0.0.0
-	eiot/pkg/middleware v0.0.0
-	eiot/pkg/mqtt v0.0.0
-	eiot/pkg/util v0.0.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/golang-jwt/jwt/v5 v5.2.0
@@ -29,7 +19,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.16.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
-	github.com/goccy/go-yaml v1.9.11 // indirect
+	
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.15.11 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.4 // indirect
@@ -48,16 +38,6 @@ require (
 )
 
 replace (
-	gorm.io/driver/sqlite => modernc.org/sqlite v1.26.0
+	gorm.io/driver/sqlite => modernc.org/sqlite v1.22.1
 	gorm.io/gorm => gorm.io/gorm v1.26.1
-	eiot/internal/dao => ./internal/dao
-	eiot/internal/handler => ./internal/handler
-	eiot/internal/logic => ./internal/logic
-	eiot/internal/model => ./internal/model
-	eiot/internal/svc => ./internal/svc
-	eiot/pkg/cache => ./pkg/cache
-	eiot/pkg/config => ./pkg/config
-	eiot/pkg/middleware => ./pkg/middleware
-	eiot/pkg/mqtt => ./pkg/mqtt
-	eiot/pkg/util => ./pkg/util
 )
