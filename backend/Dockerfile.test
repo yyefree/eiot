@@ -1,0 +1,42 @@
+# Test Dockerfile - uses the existing builder stage
+FROM golang:1.24-alpine AS test-builder
+
+WORKDIR /src
+
+# Set Go proxy to Chinese mirror
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GONOSUMDB=*
+ENV GOINSECURE=*
+
+WORKDIR /src
+
+# Copy go mod files first
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Run go mod tidy to add test dependencies
+RUN go mod tidy
+
+# Run tests with CGO_ENABLED=1 for sqlite
+RUN CGO_ENABLED=1 go test -v ./internal/logic/... 2>&1
+
+# Also test handler
+RUN CGO_ENABLED=1 go test -v ./internal/handler/... 2>&1
+
+# Also test dao
+RUN CGO_ENABLED=1 go test -v ./internal/dao/... 2>&1
+
+# Also test middleware
+RUN CGO_ENABLED=1 go test -v ./pkg/middleware/... 2>&1
+
+# Also test cache
+RUN CGO_ENABLED=1 go test -v ./pkg/cache/... 2>&1
+
+# Also test mqtt
+RUN CGO_ENABLED=1 go test -v ./pkg/mqtt/... 2>&1
+
+# Also test util
+RUN CGO_ENABLED=1 go test -v ./pkg/util/... 2>&1

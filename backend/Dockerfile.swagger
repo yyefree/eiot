@@ -1,0 +1,25 @@
+# Swagger generation Dockerfile
+FROM golang:1.24-alpine AS swagger-gen
+
+WORKDIR /src
+
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GONOSUMDB=*
+ENV GOINSECURE=*
+
+# Copy the entire backend source first (for replace directives)
+COPY backend/ ./
+
+WORKDIR /src
+
+# Download dependencies
+RUN go mod download
+
+# Install swag
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
+# Generate swagger docs
+RUN ~/go/bin/swag init -g ./cmd/api-server/main.go -o ./docs/swagger --parseDependency --parseInternal
+
+# Output the generated docs
+RUN cat ./docs/swagger/swagger.json
